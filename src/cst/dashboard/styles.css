@@ -343,3 +343,7 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .trade-history td.num { white-space: nowrap; }
 #benchmark { margin-bottom: 2px; }
 #benchmark-date { display: block; margin-bottom: 12px; }
+
+#equity { display: block; width: 100%; height: auto; }
+#equity.hidden { display: none; }
+#equity circle:hover, #equity circle:focus { stroke: var(--cream); stroke-width: 3px; outline: none; }

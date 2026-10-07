@@ -47,6 +47,7 @@ function render(next) {
     tape: next.tape,
     positions: next.positions,
     trades: next.trades,
+    realized_curve: next.realized_curve,
     focus: next.focus,
     retro: next.retrospective,
     cycle: next.cycle,
@@ -114,7 +115,7 @@ function render(next) {
     ? `${focus.venue ? focus.venue + " · " : ""}${focus.outcome ? focus.outcome + ". " : ""}${focus.detail || ""}`
     : "The desk is about to read Kalshi.";
 
-  drawEquity(next.equity_curve || [], book.start || 1000);
+  drawProfit(next.realized_curve || []);
   renderPositions(next.positions || []);
   renderTape(next.tape || [], next.cycle || {});
   renderRetro(next.retrospective, next.llm || {});
@@ -295,29 +296,31 @@ function renderTrades(rows) {
   }).join("");
 }
 
-function drawEquity(points, start) {
-  const canvas = $("equity");
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const series = points.length ? points.map((p) => p.equity) : [start];
-  const min = Math.min(start, ...series) - 2;
-  const max = Math.max(start, ...series) + 2;
-  const x = (i) => 16 + (i * (w - 32)) / Math.max(1, series.length - 1);
-  const y = (v) => 16 + (1 - (v - min) / (max - min)) * (h - 32);
-  ctx.strokeStyle = "rgba(243,234,215,0.25)";
-  ctx.setLineDash([4, 6]);
-  ctx.beginPath();
-  ctx.moveTo(16, y(start));
-  ctx.lineTo(w - 16, y(start));
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.strokeStyle = "#e0b56a";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  series.forEach((value, i) => (i ? ctx.lineTo(x(i), y(value)) : ctx.moveTo(x(i), y(value))));
-  ctx.stroke();
+function drawProfit(points) {
+  const chart = $("equity");
+  const series = [0, ...points.map(p => p.cumulative_pnl)];
+  const total = series[series.length - 1];
+  $("profit-total").textContent = money(total, 3);
+  $("profit-total").className = `num ${total < 0 ? "bad" : total > 0 ? "good" : ""}`;
+  $("profit-empty").classList.toggle("hidden", points.length > 0);
+  chart.classList.toggle("hidden", points.length === 0);
+  const lo = Math.min(...series), hi = Math.max(...series);
+  const pad = Math.max((hi - lo) * 0.2, 0.01);
+  const min = lo - pad, max = hi + pad;
+  const x = i => 95 + i * 970 / Math.max(1, points.length);
+  const y = value => 20 + (max - value) / (max - min) * 175;
+  const ticks = [...new Set([lo, 0, hi])];
+  let path = `M ${x(0)} ${y(0)}`;
+  series.slice(1).forEach((value, i) => { path += ` H ${x(i + 1)} V ${y(value)}`; });
+  chart.innerHTML = `<title>Cumulative net profit from ${points.length} completed trades</title>
+    ${ticks.map(value => `<line x1="95" x2="1065" y1="${y(value)}" y2="${y(value)}" stroke="${value === 0 ? '#948773' : '#38332b'}" stroke-dasharray="4 5"/><text x="82" y="${y(value) + 4}" text-anchor="end" fill="#afa595" font-size="13">${esc(money(value, 3))}</text>`).join("")}
+    <path d="${path}" fill="none" stroke="#e0b56a" stroke-width="2.5"/>
+    <text x="95" y="225" fill="#afa595" font-size="13">Start · $0</text>
+    <text x="1065" y="225" text-anchor="end" fill="#afa595" font-size="13">${points.length} completed trade${points.length === 1 ? '' : 's'}</text>
+    ${points.map((point, i) => {
+      const label = `${point.title} · ${point.side ? point.side.toUpperCase() : 'Pick unavailable'} · ${new Date(point.ts).toLocaleString()} · Trade ${money(point.pnl, 3)} · Total ${money(point.cumulative_pnl, 3)}`;
+      return `<circle cx="${x(i + 1)}" cy="${y(point.cumulative_pnl)}" r="6" fill="${point.pnl < 0 ? '#df967e' : '#a9ce8b'}" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title></circle>`;
+    }).join("")}`;
 }
 
 async function pull() {

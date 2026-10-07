@@ -721,6 +721,7 @@ class Engine:
             "positions": [item.to_json() for item in positions],
             "trades": [item.to_json() for item in self.store.trades(30)],
             "equity_curve": self.store.equity_curve(),
+            "realized_curve": self.store.realized_curve(),
             "params": param_rows,
             "retrospective": retros[0] if retros else None,
             "retrospective_history": retros,

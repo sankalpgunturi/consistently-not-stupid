@@ -1319,3 +1319,23 @@ def test_dashboard_asset_urls_change_when_script_changes(tmp_path, monkeypatch):
         after = re.search(r'/static/app.js\?v=[a-f0-9]+', client.get('/').text).group()
         assert before != after
         assert client.get(after).status_code == 200
+
+
+def test_realized_curve_counts_completed_trades_and_fees_once(tmp_path):
+    store = Store(tmp_path / 'book.sqlite', make_params(), 1000)
+    broker = PaperBroker(store)
+    q = make_quote(ask=0.925)
+    broker.buy(q, 1, 'paper_favorite', 'test', 1)
+    broker.mark(store.positions()[0], 0.81)
+    assert store.realized_curve() == []
+    broker.sell(store.positions()[0], 0.81, 'test exit')
+    q = make_quote(market_id='second', ask=0.93, side='no')
+    broker.buy(q, 1, 'paper_favorite', 'test', 2)
+    broker.settle(store.positions()[0], True)
+    broker.buy(make_quote(market_id='still-open'), 1, 'paper_favorite', 'test', 3)
+    points = store.realized_curve()
+    assert len(points) == 2
+    assert points[0]['cumulative_pnl'] == pytest.approx(-0.145)
+    assert points[1]['cumulative_pnl'] == pytest.approx(-0.085)
+    assert points[1]['pnl'] == pytest.approx(0.06)
+    assert points[1]['side'] == 'no'

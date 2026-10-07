@@ -28,9 +28,9 @@
     </div>
 
     <section class="card balance-chart">
-      <div class="card-head"><h2>Account value over time</h2></div>
-      <p class="muted" id="benchmark" aria-live="polite">S&amp;P 500 equivalent: —</p><small class="muted" id="benchmark-date"></small>
-      <canvas id="equity" width="1100" height="190" aria-label="Paper account balance over time"></canvas>
+      <div class="card-head"><h2>Profit after fees</h2><span id="profit-total" class="num"></span></div>
+      <svg id="equity" viewBox="0 0 1100 240" role="img" aria-label="Cumulative profit and loss from completed trades"></svg>
+      <p id="profit-empty" class="empty">No completed trades yet.</p>
     </section>
 
     <section class="layout trades-layout">
@@ -54,6 +54,8 @@
 
     <details class="card disclosure">
       <summary>Details</summary>
+      <p class="muted" id="benchmark">S&amp;P 500 equivalent: —</p>
+      <small class="muted" id="benchmark-date"></small>
       <section class="evidence" id="evidence" aria-label="Account details"></section>
       <div class="card-head section-heading"><h2>Latest scan</h2><p class="muted" id="scan-meta">—</p></div>
       <section class="funnel" id="funnel"></section>

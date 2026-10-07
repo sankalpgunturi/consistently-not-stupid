@@ -473,6 +473,19 @@ class Store:
             ).fetchall()
         return [_trade(row) for row in rows]
 
+    def realized_curve(self) -> list[dict]:
+        """Completed trades only; pnl already includes entry and exit fees."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, ts, title, side, pnl FROM trades WHERE action IN ('sell', 'settle') ORDER BY ts, rowid"
+            ).fetchall()
+        total = 0.0
+        points = []
+        for row in rows:
+            total += row["pnl"]
+            points.append(dict(row, cumulative_pnl=round(total, 6)))
+        return points
+
     def add_equity(self, equity: float, ts: datetime | None = None) -> None:
         with self.lock:
             self.conn.execute(
