@@ -127,7 +127,7 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     if edge + 1e-12 < params.min_edge or lower + 1e-12 < params.min_probability:
         return None
     detail = (
-        f"In the {price_bucket(quote.ask)} bucket, {wins} of {n} settled favorites won. "
+        f"In the {price_bucket(quote.ask)} bucket, {wins} of {n} favorites quoted there with time still left won. "
         f"The cautious win rate is {lower:.1%}, against an all-in cost of {_cents(quote.ask + per_share)}."
     )
     return Proposal(

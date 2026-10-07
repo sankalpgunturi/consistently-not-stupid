@@ -26,8 +26,14 @@ def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     return quotes, [err] if err else []
 
 
-def default_history(settings: Settings) -> tuple[dict[str, tuple[int, int]] | None, str | None]:
-    return fetch_settled_record(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
+def default_history(settings: Settings, skip: set[str], hours: float) -> tuple[dict[str, dict] | None, str | None]:
+    return fetch_settled_record(
+        settings.kalshi_base_url,
+        settings.kalshi_pages,
+        settings.kalshi_page_size,
+        hours,
+        skip,
+    )
 
 
 def quote_on_side(quotes: list[Quote], side: str) -> Quote | None:
@@ -236,7 +242,6 @@ class Engine:
         updated, notes, applied = self.store.revise_params(revise)
         if applied:
             self.store.set_governor_seen(len(settlements))
-        if applied:
             self.store.append_audit(
                 "governor",
                 "tighten",
@@ -312,15 +317,19 @@ class Engine:
             price=position.entry_price,
             fee_per_share=fee_per,
             pnl=pnl,
+            market_id=position.market_id,
         ))
 
     def _refresh_history(self) -> str | None:
         if self.history is None:
             return None
-        record, err = self.history(self.settings)
+        hours = float(self.store.params().min_hours_to_expiry)
+        skip = self.store.venue_checked(hours) | self.store.settled_market_ids()
+        record, err = self.history(self.settings, skip, hours)
         if err or record is None:
             return err or "Kalshi settled record: no sample."
-        self.store.set_venue_record(record)
+        # An empty page is a finished read. It must not wipe a record already stored.
+        self.store.add_venue_samples(record)
         return None
 
     def _refresh(self, venue: str, market_id: str, side: str) -> Quote | None:

@@ -16,6 +16,26 @@ def _iso(dt: datetime | None = None) -> str:
     return (dt or utcnow()).astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _bucket_counts(samples: dict, hours: float, skip: set[str]) -> dict[str, tuple[int, int]]:
+    """Wins and observations for priced samples taken at this horizon."""
+    found: dict[str, list[int]] = {}
+    for ticker, row in samples.items():
+        if str(ticker) in skip or not isinstance(row, dict) or row.get("price") is None:
+            continue
+        try:
+            row_hours = float(row.get("hours"))
+        except (TypeError, ValueError):
+            continue
+        if abs(row_hours - float(hours)) > 1e-6:
+            continue
+        bucket = str(row.get("bucket") or "")
+        if not bucket:
+            continue
+        wins, count = found.get(bucket, [0, 0])
+        found[bucket] = [wins + (1 if row.get("won") else 0), count + 1]
+    return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
+
+
 class Store:
     def __init__(self, path: Path, params: StrategyParams, bankroll: float):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +86,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS settlements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TEXT, bucket TEXT, won INTEGER, price REAL,
-                fee_per_share REAL, pnl REAL
+                fee_per_share REAL, pnl REAL, market_id TEXT
             );
             CREATE TABLE IF NOT EXISTS audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +95,9 @@ class Store:
             );
             """
         )
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(settlements)")}
+        if "market_id" not in columns:
+            self.conn.execute("ALTER TABLE settlements ADD COLUMN market_id TEXT")
         self.conn.commit()
 
     def _seed(self, params: StrategyParams) -> None:
@@ -339,10 +362,18 @@ class Store:
         with self.lock:
             self.conn.execute(
                 """
-                INSERT INTO settlements (ts, bucket, won, price, fee_per_share, pnl)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO settlements (ts, bucket, won, price, fee_per_share, pnl, market_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (_iso(), row.bucket, 1 if row.won else 0, row.price, row.fee_per_share, row.pnl),
+                (
+                    _iso(),
+                    row.bucket,
+                    1 if row.won else 0,
+                    row.price,
+                    row.fee_per_share,
+                    row.pnl,
+                    row.market_id or "",
+                ),
             )
             self.conn.commit()
 
@@ -356,9 +387,17 @@ class Store:
                 price=row["price"],
                 fee_per_share=row["fee_per_share"],
                 pnl=row["pnl"],
+                market_id=str(row["market_id"] or ""),
             )
             for row in rows
         ]
+
+    def settled_market_ids(self) -> set[str]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT market_id FROM settlements WHERE market_id IS NOT NULL AND market_id != ''"
+            ).fetchall()
+        return {str(row["market_id"]) for row in rows}
 
     def venue_record(self) -> dict[str, tuple[int, int]]:
         with self.lock:
@@ -377,11 +416,58 @@ class Store:
             self._put("venue_record", payload)
             self.conn.commit()
 
+    def venue_samples(self) -> dict[str, dict]:
+        with self.lock:
+            raw = self._get("venue_samples") or {}
+        if not isinstance(raw, dict):
+            return {}
+        return {str(ticker): row for ticker, row in raw.items() if isinstance(row, dict)}
+
+    def venue_checked(self, hours: float) -> set[str]:
+        """Tickers already read at this horizon. A different horizon is read again."""
+        found: set[str] = set()
+        for ticker, row in self.venue_samples().items():
+            try:
+                row_hours = float(row.get("hours"))
+            except (TypeError, ValueError):
+                continue
+            if abs(row_hours - float(hours)) <= 1e-6:
+                found.add(ticker)
+        return found
+
+    def add_venue_samples(self, incoming: dict) -> None:
+        """Merge new per-ticker rows. An empty dict leaves an injected record alone."""
+        if not incoming:
+            return
+        with self.lock:
+            current = self._get("venue_samples") or {}
+            if not isinstance(current, dict):
+                current = {}
+            for ticker, row in incoming.items():
+                if isinstance(row, dict):
+                    current[str(ticker)] = row
+            self._put("venue_samples", current)
+            hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
+            counts = _bucket_counts(current, hours, set())
+            self._put("venue_record", {bucket: [wins, count] for bucket, (wins, count) in counts.items()})
+            self.conn.commit()
+
     def calibration(self) -> dict[str, tuple[int, int]]:
-        """Venue settled history, plus this desk's own resolutions in the same buckets."""
+        """Pre-close venue samples, plus this desk's own resolutions, each ticker once.
+
+        A ticker we settled is left out of the venue counts and added from our
+        settlement. An injected bucket record is the fallback when no samples
+        have been stored, so a test fixture still opens the gate.
+        """
+        samples = self.venue_samples()
         found: dict[str, list[int]] = {}
-        for bucket, (wins, count) in self.venue_record().items():
-            found[bucket] = [wins, count]
+        if samples:
+            hours = float(self.params().min_hours_to_expiry)
+            for bucket, (wins, count) in _bucket_counts(samples, hours, self.settled_market_ids()).items():
+                found[bucket] = [wins, count]
+        else:
+            for bucket, (wins, count) in self.venue_record().items():
+                found[bucket] = [wins, count]
         for row in self.settlements():
             wins, count = found.get(row.bucket, [0, 0])
             found[row.bucket] = [wins + (1 if row.won else 0), count + 1]

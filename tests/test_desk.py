@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,7 @@ from cst.simulate import run_report
 from cst.store import Store
 from cst.strategy import evaluate, price_bucket, quote_in_band, wilson_lower
 from cst.text import related, same_proposition
-from cst.venues.kalshi import quotes_from_kalshi_market, record_from_settled_markets, settled_favorite
+from cst.venues.kalshi import fetch_settled_record, quotes_from_kalshi_market, settled_favorite, yes_price_before_close
 from tests.conftest import NOW, make_book, make_params, make_quote
 
 RECORD = {price_bucket(0.94): (100, 100)}
@@ -110,22 +110,63 @@ def test_venue_history_opens_a_bucket_the_desk_has_not_settled(tmp_path):
     assert store.calibration()[price_bucket(0.94)] == (100, 101)
 
 
-def test_a_settled_last_print_is_a_sample_and_a_rail_print_is_not():
-    assert settled_favorite({"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "20"}) == (0.94, True)
-    assert settled_favorite({"result": "no", "last_price_dollars": "0.0600", "volume_fp": "20"}) == (0.94, True)
-    assert settled_favorite({"result": "yes", "last_price_dollars": "0.0600", "volume_fp": "20"}) == (0.94, False)
-    assert settled_favorite({"result": "yes", "last_price_dollars": "1.0000", "volume_fp": "20"}) is None
-    assert settled_favorite({"result": "no", "last_price_dollars": "0.0000", "volume_fp": "20"}) is None
-    assert settled_favorite({"result": "yes", "last_price_dollars": "0.5000", "volume_fp": "20"}) is None
-    assert settled_favorite({"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "0"}) is None
-    assert settled_favorite({"result": "yes", "volume_fp": "20"}) is None
-    assert settled_favorite({"last_price_dollars": "0.9400", "volume_fp": "20"}) is None
-    record = record_from_settled_markets([
-        {"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "20"},
-        {"result": "no", "last_price_dollars": "0.9400", "volume_fp": "20"},
-        {"result": "yes", "last_price_dollars": "1.0000", "volume_fp": "20"},
-    ])
-    assert record[price_bucket(0.94)] == (1, 2)
+def test_a_price_with_time_left_is_a_sample_and_a_last_print_is_not():
+    yes = {"result": "yes", "volume_fp": "20"}
+    assert settled_favorite(yes, 0.94) == (0.94, True)
+    assert settled_favorite({"result": "no", "volume_fp": "20"}, 0.06) == (0.94, True)
+    assert settled_favorite({"result": "no", "volume_fp": "20"}, 0.07) == (0.93, True)
+    assert price_bucket(settled_favorite({"result": "no", "volume_fp": "20"}, 0.07)[0]) == "0.93–0.96"
+    assert settled_favorite(yes, 0.06) == (0.94, False)
+    assert settled_favorite(yes, 1.0) is None
+    assert settled_favorite({"result": "no", "volume_fp": "20"}, 0.0) is None
+    assert settled_favorite(yes, 0.50) is None
+    assert settled_favorite({"result": "yes", "volume_fp": "0"}, 0.94) is None
+    assert settled_favorite(yes, None) is None
+    assert settled_favorite({"volume_fp": "20"}, 0.94) is None
+    market = {
+        "ticker": "KXTEST",
+        "result": "yes",
+        "volume_fp": "20",
+        "last_price_dollars": "0.9900",
+        "open_time": "2026-10-07T00:00:00Z",
+        "close_time": "2026-10-08T12:00:00Z",
+    }
+    assert settled_favorite(market, 0.40) is None
+    early = {"yes_price_dollars": "0.9400", "created_time": "2026-10-08T09:00:00Z"}
+    late = {"yes_price_dollars": "0.9900", "created_time": "2026-10-08T11:30:00Z"}
+    assert yes_price_before_close(market, [late, early], 2) == 0.94
+    assert yes_price_before_close(market, [late], 2) is None
+    assert settled_favorite(market, yes_price_before_close(market, [late, early], 2)) == (0.94, True)
+
+    class _Http:
+        def __init__(self, trades):
+            self.trades = trades
+            self.calls = []
+
+        def get_json(self, url, params=None):
+            self.calls.append((url, params or {}))
+            if url.endswith("/markets/trades"):
+                return {"trades": self.trades}
+            return {"markets": [market], "cursor": ""}
+
+        def close(self):
+            pass
+
+    http = _Http([late, early])
+    samples, err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 100, 2, http=http)
+    assert err is None
+    assert samples["KXTEST"]["price"] == 0.94
+    assert samples["KXTEST"]["won"] is True
+    trade_call = next(params for url, params in http.calls if url.endswith("/markets/trades"))
+    cutoff = int(datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc).timestamp())
+    assert trade_call["max_ts"] == str(cutoff)
+    assert trade_call["limit"] == "1"
+    missed, _err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 100, 2, http=_Http([late]))
+    assert missed["KXTEST"]["price"] is None
+    again, _err = fetch_settled_record(
+        "https://kalshi.example/trade-api/v2", 1, 100, 2, skip={"KXTEST"}, http=_Http([early])
+    )
+    assert again == {}
 
 
 def test_one_event_keeps_one_clip():
@@ -590,7 +631,7 @@ def test_manual_close_needs_size(tmp_path):
         assert engine.store.positions() == []
 
 
-def test_refresh_keeps_a_book_pinned_at_the_rail():
+def test_refresh_keeps_a_book_pinned_at_the_rail(tmp_path):
     kalshi = {
         "ticker": "KXTEST-1",
         "event_ticker": "KXTEST",
@@ -616,6 +657,28 @@ def test_refresh_keeps_a_book_pinned_at_the_rail():
     unmarked = quotes_from_kalshi_market(priced_only, keep_extremes=True)
     assert unmarked
     assert all(not item.settled for item in unmarked)
+    absent = {
+        "ticker": "KXTEST-1",
+        "event_ticker": "KXTEST",
+        "title": "Settled without a book",
+        "status": "settled",
+        "result": "yes",
+        "close_time": "2026-10-08T00:00:00Z",
+    }
+    bare = quotes_from_kalshi_market(absent, keep_extremes=True)
+    yes_side = next(item for item in bare if item.side == "yes")
+    no_side = next(item for item in bare if item.side == "no")
+    assert yes_side.bid == 1.0 and yes_side.ask == 1.0
+    assert yes_side.settled is True and yes_side.winner == "yes"
+    assert no_side.bid == 0.0 and no_side.ask == 0.0 and no_side.settled is True
+    engine = Engine(Settings(data_dir=str(tmp_path), bankroll=1000), fetcher=lambda _settings: ([], []))
+    PaperBroker(engine.store).buy(make_quote(market_id="KXTEST-1"), 1, "learned", "test", 1)
+    engine.refresher = lambda _venue, _market_id, side: quote_on_side(bare, side)
+    engine.mark_open()
+    assert engine.store.positions() == []
+    assert len(engine.store.settlements()) == 1
+    assert engine.store.settlements()[0].won is True
+    assert engine.store.settlements()[0].market_id == "KXTEST-1"
 
 
 def test_refresh_does_not_borrow_the_other_side(tmp_path, monkeypatch):
@@ -758,13 +821,32 @@ def test_model_suggestions_wait_for_a_new_settlement(tmp_path):
     assert engine.store.params().min_probability == 0.91
 
 
+def test_a_desk_settlement_is_counted_once(tmp_path):
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    bucket = price_bucket(0.94)
+    store.add_venue_samples({
+        "KX1": {"price": 0.94, "won": True, "hours": 2, "bucket": bucket},
+        "KXSHORT": {"price": None, "hours": 2},
+    })
+    assert store.calibration()[bucket] == (1, 1)
+    store.add_settlement(Settlement(bucket, True, 0.94, 0.01, 0.04, market_id="KX1"))
+    assert store.calibration()[bucket] == (1, 1)
+    store.add_settlement(Settlement(bucket, False, 0.94, 0.01, -1, market_id="KX2"))
+    assert store.calibration()[bucket] == (1, 2)
+    store.add_venue_samples({})
+    assert store.calibration()[bucket] == (1, 2)
+
+
 def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_path):
     quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    record = {price_bucket(0.94): (100, 100)}
+    bucket = price_bucket(0.94)
 
-    def history(_settings):
-        return record, None
+    def history(_settings, _skip, hours):
+        return {
+            f"KX{i}": {"price": 0.94, "won": True, "hours": hours, "bucket": bucket}
+            for i in range(100)
+        }, None
 
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []), history=history)
     engine.refresher = lambda *_args: None
@@ -773,11 +855,11 @@ def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_
     state = engine.run_cycle()
     assert state["counts"]["bought"] == 1
     assert engine.store.settlements() == []
-    assert engine.store.venue_record()[price_bucket(0.94)] == (100, 100)
-    engine.history = lambda _settings: (None, "Kalshi settled record: down")
+    assert engine.store.venue_record()[bucket] == (100, 100)
+    engine.history = lambda _settings, _skip, _hours: (None, "Kalshi settled record: down")
     engine.fetcher = lambda _settings: ([], [])
     again = engine.run_cycle()
-    assert engine.store.venue_record()[price_bucket(0.94)] == (100, 100)
+    assert engine.store.venue_record()[bucket] == (100, 100)
     assert any("settled record" in item.lower() for item in again["errors"])
 
 

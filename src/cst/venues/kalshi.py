@@ -8,13 +8,16 @@ can name the event instead of the ticker.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from cst.models import Quote
 from cst.strategy import price_bucket
 from cst.venues.http import MarketHttp
 
 log = logging.getLogger("cst.kalshi")
+
+# Trade lookups per scan. The market list is cheap; each early trade is its own read.
+TRADE_LOOKUPS = 40
 
 _CATEGORIES = (
     ("KXNBA", "Basketball"),
@@ -114,11 +117,15 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
         bid_size = _num(raw_bid_size) if raw_bid_size not in (None, "") else -1.0
         if bid_size is None:
             bid_size = -1.0
-        if bid is None or ask is None:
+        if settled and winner and (bid is None or ask is None):
+            # A settled payload can omit the book. The winner is the mark.
+            bid = 1.0 if winner == side else 0.0
+            ask = bid
+        elif bid is None or ask is None:
             continue
-        if not settled and not _book_ok(bid, ask, keep_extremes):
+        elif not settled and not _book_ok(bid, ask, keep_extremes):
             continue
-        if settled and bid <= 0 and ask <= 0:
+        elif settled and bid <= 0 and ask <= 0:
             bid, ask = (1.0, 1.0) if winner == side else (0.0, 0.0)
         quotes.append(Quote(
             venue="kalshi",
@@ -206,13 +213,43 @@ def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[st
     return found
 
 
-def settled_favorite(market: dict) -> tuple[float, bool] | None:
-    """Last traded favorite in ``[0.90, 1)``, and whether that side won.
+def _close_time(market: dict) -> datetime | None:
+    return _dt(market.get("close_time") or market.get("expected_expiration_time"))
 
-    A last price of 0 or 1 is the settlement print, not a quote, so it is not
-    a sample. A cheap yes print means the no side was the favorite.
+
+def yes_price_before_close(market: dict, trades: list, hours: float) -> float | None:
+    """Latest yes trade at least ``hours`` before close.
+
+    A trade after that cutoff is the price of a market about to settle, which
+    is not the quote the desk is allowed to buy.
     """
-    if not isinstance(market, dict):
+    close = _close_time(market)
+    if close is None or hours <= 0:
+        return None
+    cutoff = close - timedelta(hours=hours)
+    best: float | None = None
+    best_at: datetime | None = None
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        traded_at = _dt(trade.get("created_time"))
+        price = _num(trade.get("yes_price_dollars"))
+        if traded_at is None or price is None or traded_at > cutoff:
+            continue
+        if best_at is None or traded_at > best_at:
+            best_at = traded_at
+            best = price
+    return best
+
+
+def settled_favorite(market: dict, yes_price: float | None) -> tuple[float, bool] | None:
+    """Favorite quoted at ``yes_price``, and whether that side won.
+
+    ``yes_price`` is a trade from when time was still left, not the final print.
+    A price of 0 or 1 is not a quote. A cheap yes price means the no side was
+    the favorite.
+    """
+    if not isinstance(market, dict) or yes_price is None:
         return None
     if market.get("mve_collection_ticker") or market.get("mve_selected_legs"):
         return None
@@ -222,50 +259,65 @@ def settled_favorite(market: dict) -> tuple[float, bool] | None:
     volume = _num(market.get("volume_fp"))
     if volume is None or volume < 10:
         return None
-    last = _num(market.get("last_price_dollars"))
-    if last is None:
-        return None
-    if 0.90 <= last < 1:
-        return last, result == "yes"
-    if 0 < last <= 0.10:
-        price = 1 - last
+    yes_price = round(yes_price, 4)
+    if 0.90 <= yes_price < 1:
+        return yes_price, result == "yes"
+    if 0 < yes_price <= 0.10:
+        price = round(1 - yes_price, 4)
         if 0.90 <= price < 1:
             return price, result == "no"
     return None
 
 
-def record_from_settled_markets(markets: list[dict]) -> dict[str, tuple[int, int]]:
-    """Wins and samples per price bucket. One last print is one observation."""
-    found: dict[str, list[int]] = {}
-    for market in markets:
-        observed = settled_favorite(market)
-        if observed is None:
-            continue
-        price, won = observed
-        bucket = price_bucket(price)
-        wins, count = found.get(bucket, [0, 0])
-        found[bucket] = [wins + int(won), count + 1]
-    return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
+def _sample_row(price: float | None, won: bool, hours: float) -> dict:
+    if price is None:
+        return {"price": None, "hours": hours}
+    return {"price": price, "won": won, "hours": hours, "bucket": price_bucket(price)}
+
+
+def _needs_trade(market: dict, hours: float) -> bool:
+    """True when a pre-close trade could exist. Short markets are not a sample."""
+    if market.get("mve_collection_ticker") or market.get("mve_selected_legs"):
+        return False
+    result = str(market.get("result") or "").lower()
+    if result not in {"yes", "no"}:
+        return False
+    volume = _num(market.get("volume_fp"))
+    if volume is None or volume < 10:
+        return False
+    close = _close_time(market)
+    if close is None:
+        return False
+    opened = _dt(market.get("open_time"))
+    if opened is not None and opened > close - timedelta(hours=hours):
+        return False
+    return True
 
 
 def fetch_settled_record(
     base_url: str,
     pages: int,
     page_size: int,
+    hours: float,
+    skip: set[str] | None = None,
     http: MarketHttp | None = None,
-) -> tuple[dict[str, tuple[int, int]] | None, str | None]:
-    """The first pages of settled Kalshi markets, counted into price buckets.
+) -> tuple[dict[str, dict] | None, str | None]:
+    """New per-ticker samples from settled markets.
 
-    ``None`` for the record means the read failed and the caller should keep
-    the previous sample. An empty dict is a real read that found no favorites.
+    The price is the latest trade at least ``hours`` before close. Markets
+    with no such trade are stored with a null price so the next scan does not
+    read them again. ``None`` for the whole payload means the market list
+    failed and the caller should keep the previous sample. Trade lookups are
+    capped; the rest wait for a later scan.
     """
     own = http is None
     client = http or MarketHttp()
     root = base_url.rstrip("/")
+    seen = skip or set()
     markets: list[dict] = []
     try:
         cursor = ""
-        for _ in range(pages):
+        for _ in range(max(pages, 0)):
             params = {"status": "settled", "limit": str(page_size), "mve_filter": "exclude"}
             if cursor:
                 params["cursor"] = cursor
@@ -277,10 +329,45 @@ def fetch_settled_record(
             cursor = payload.get("cursor") or ""
             if not cursor or not batch:
                 break
-        return record_from_settled_markets(markets), None
     except Exception as exc:
         log.warning("kalshi settled record failed: %s", exc)
+        if own:
+            client.close()
         return None, f"Kalshi settled record: {exc}"
+    samples: dict[str, dict] = {}
+    lookups = 0
+    try:
+        for market in markets:
+            ticker = str(market.get("ticker") or "")
+            if not ticker or ticker in seen or ticker in samples:
+                continue
+            if not _needs_trade(market, hours):
+                samples[ticker] = _sample_row(None, False, hours)
+                continue
+            if lookups >= TRADE_LOOKUPS:
+                break
+            close = _close_time(market)
+            if close is None:
+                continue
+            cutoff = int((close - timedelta(hours=hours)).timestamp())
+            try:
+                payload = client.get_json(
+                    f"{root}/markets/trades",
+                    params={"ticker": ticker, "limit": "1", "max_ts": str(cutoff)},
+                )
+            except Exception as exc:
+                log.warning("kalshi trades %s failed: %s", ticker, exc)
+                continue
+            lookups += 1
+            trades = payload.get("trades") if isinstance(payload, dict) else None
+            yes_price = yes_price_before_close(market, trades or [], hours)
+            observed = settled_favorite(market, yes_price)
+            if observed is None:
+                samples[ticker] = _sample_row(None, False, hours)
+            else:
+                price, won = observed
+                samples[ticker] = _sample_row(price, won, hours)
+        return samples, None
     finally:
         if own:
             client.close()

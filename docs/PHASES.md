@@ -4,7 +4,7 @@ Living log for Consistently Not Stupid. Update this file at the end of each phas
 
 ## Intent
 
-A Kalshi paper desk. Polymarket was removed; do not add it back, and do not buy a favorite because the quote is high. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one. A buy needs the settled record to clear the all-in cost. That record is seeded from Kalshi's settled last prints, not from a bootstrap of unconfirmed clips.
+A Kalshi paper desk. Polymarket was removed; do not add it back, and do not buy a favorite because the quote is high. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one. A buy needs the settled record to clear the all-in cost. That record is the latest trade at least `min_hours_to_expiry` before close, not a bootstrap of unconfirmed clips.
 
 ## Phase 1 — Plan
 
@@ -92,4 +92,8 @@ Cold start was real at the end of this phase: the Wilson lower bound of a perfec
 
 ## Phase 8 — A record the desk can actually use
 
-Status: done. The entry sample is the first pages of settled Kalshi markets, counted by the last trade's price bucket, plus this desk's own resolutions. A last price of 0 or 1 is not a quote. The desk does not buy extra clips to build the sample. The governor and a model suggestion both wait for a new settlement of ours before they tighten. A missing Kalshi bid is not a quoted zero. A tighten during the fetch applies to that scan's fills. An unbracketed IPv6 bind matches the bracketed Host a browser sends. Pair-approval fields are gone from the snapshot and the decision.
+Status: done. The entry sample is the first pages of settled Kalshi markets, plus this desk's own resolutions. A price of 0 or 1 is not a quote. The desk does not buy extra clips to build the sample. The governor and a model suggestion both wait for a new settlement of ours before they tighten. A missing Kalshi bid on a live market is not a quoted zero. A tighten during the fetch applies to that scan's fills. An unbracketed IPv6 bind matches the bracketed Host a browser sends. Pair-approval fields are gone from the snapshot and the decision. Phase 9 replaced the last-print price with the trade taken while time was still left.
+
+## Phase 9 — The sample matches the gate
+
+Status: done. The gate asks whether a favorite quoted with at least `min_hours_to_expiry` still to run usually won. The seed is the latest trade at least that far before close. A final print is not a sample, and a market with no such trade is stored as checked and left out of the counts. Each scan reads at most 40 of those trades; the rest wait. A ticker this desk has settled is counted once, from the desk's own settlement. A settled market whose bid and ask are missing still marks a held clip from `result`. The Wilson gate is unchanged, and a bucket under 30 observations stays in cash.

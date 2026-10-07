@@ -16,7 +16,7 @@ A contract priced at 90¢ is not a gift. If that price is the true chance, buyin
 2. The spread is tight, the book has some depth, and the contract closes between 2 hours and 21 days out. A 95¢ "no" on a 2028 nomination locks cash for years and is skipped.
 3. If the favorite wins, the payout still clears the venue fee by at least 1¢ a share. Near 99¢, the fee often eats the rest, so those are skipped too.
 4. The quote has sat in that band for two scans (about 20 minutes at the default cadence).
-5. The settled record for that price bucket sits above the all-in cost (ask plus the Kalshi fee) by at least the minimum edge. The record starts from Kalshi's own settled markets whose last trade was in that bucket, and this desk's resolutions are added on top. A bucket needs 30 observations. The cautious win rate is a Wilson lower bound, not the raw hit rate. A high quote by itself is not a buy, and the desk does not take extra clips to manufacture a sample.
+5. The settled record for that price bucket sits above the all-in cost (ask plus the Kalshi fee) by at least the minimum edge. The record is Kalshi settled markets whose latest trade, taken at least two hours before close, sat in that bucket, plus this desk's own resolutions. Each market counts once. A bucket needs 30 observations. The cautious win rate is a Wilson lower bound, not the raw hit rate. A high quote by itself is not a buy, and the desk does not take extra clips to manufacture a sample.
 6. The clip is one Kalshi contract, and a fresh orderbook has to show enough size. It also has to fit inside 0.8% of equity.
 7. The book does not already hold that event, or a close cousin of it. One French election, one Bitcoin ladder, one city temperature.
 

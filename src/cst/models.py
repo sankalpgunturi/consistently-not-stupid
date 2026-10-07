@@ -293,6 +293,7 @@ class Settlement:
     price: float
     fee_per_share: float
     pnl: float
+    market_id: str = ""
 
 
 @dataclass(slots=True)
