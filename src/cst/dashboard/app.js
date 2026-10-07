@@ -226,11 +226,10 @@ function renderTrades(rows, positions = []) {
   $("trades-empty").classList.toggle("hidden", visible.length > 0);
   $("trades").innerHTML = visible.map(({entry, exit, position}) => {
     const row = entry || exit;
-    const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
-    const result = !exit ? "Open" : exit.action === "settle" ? (exit.won ? "Won" : "Lost") : stopped ? "Stop-loss" : "Sold";
+    const stopped = exit?.action === "sell" && /stop.loss|bid fell/i.test(exit.reason || "");
     const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
     const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
-    const outcomeLabel = exit?.action === "sell" ? `${exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat"} · ${result}` : result;
+    const outcomeLabel = !exit ? "Open" : exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat";
     const probability = entry ? `${Number((entry.price * 100).toFixed(2))}%` : "—";
     const closeAt = exit?.ts || position?.end_time;
     const closeLabel = exit ? "Closed" : "Expected close";
@@ -258,7 +257,7 @@ function renderTrades(rows, positions = []) {
       const winner = exit.won ? pick : pick === 'YES' ? 'NO' : 'YES';
       outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${cents(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
     } else {
-      outcomeStory = `Sold before settlement at ${time(exit.ts)}. Received ${cents(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
+      outcomeStory = `${stopped ? 'Stop loss closed this bet' : 'We closed this bet'} before settlement at ${time(exit.ts)}. Received ${cents(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.${stopped ? ` ${exit.reason}` : ''}`;
     }
     const detailHtml = `<div class="trade-detail-body trade-story">
       <p class="trade-story-pick">We picked <strong>${esc(pick || 'an unrecorded side')}</strong>.</p>
