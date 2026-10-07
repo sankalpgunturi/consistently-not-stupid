@@ -11,7 +11,7 @@
   --green: #9dcc86;
   --red: #e58972;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font: "IBM Plex Mono", "Courier New", monospace;
 }
 
 * { box-sizing: border-box; }
@@ -352,3 +352,8 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .trade-loss .trade-result { color: var(--red); font-weight: 600; }
 
 .stat strong, .num, #equity text { font-variant-numeric: tabular-nums; }
+
+.trade-history td { padding: 12px; border-top: 1px solid rgba(243, 234, 215, 0.25); border-bottom: 1px solid rgba(243, 234, 215, 0.25); }
+.trade-history td.title { display: table-cell; }
+.trade-history td:first-child { border-left: 1px solid rgba(243, 234, 215, 0.25); }
+.trade-history td:last-child { border-right: 1px solid rgba(243, 234, 215, 0.25); }
