@@ -695,7 +695,8 @@ class Engine:
             "next_scan_at": info.get("next_scan_at") or self._next_scan.isoformat(timespec="seconds"),
             "book": {
                 "start": float(self.settings.bankroll),
-                "equity": round(equity, 2),
+                "equity": round(equity, 6),
+                "growth_multiple": equity / float(self.settings.bankroll) if self.settings.bankroll else None,
                 "cash": round(self.store.cash(), 2),
                 "deployed": round(sum(item.cost_basis for item in positions), 2),
                 "realized": round(self.store.realized(), 2),
