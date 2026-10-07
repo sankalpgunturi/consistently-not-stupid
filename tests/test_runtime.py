@@ -382,3 +382,27 @@ def test_model_timeout_exception_is_not_swallowed_as_polling_timeout(tmp_path):
         raise TimeoutError('model request expired')
     with engine._lock, pytest.raises(TimeoutError, match='model request expired'):
         engine._model_wait(fail)
+
+
+def test_early_exit_triggers_one_review_without_inventing_settlement(tmp_path, monkeypatch):
+    from tests.conftest import make_quote
+    reviewer = Reviewer('test', 'test')
+    calls = []
+    monkeypatch.setattr(reviewer, '_complete', lambda payload: calls.append(payload) or {'summary': 'Reviewed exits.'})
+    engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _: ([], []), reviewer=reviewer)
+    engine.refresher = lambda *_: None
+    PaperBroker(engine.store).buy(make_quote(), 1, 'paper_favorite', 'test', 0)
+    engine.run_cycle()
+    assert len(calls) == 1
+    trade = engine.broker.sell(engine.store.positions()[0], .54, 'Stop-loss test')
+    assert trade.pnl < 0
+    assert engine.store.settlements() == []
+    assert engine.store.last_close_id() == trade.id
+    state = engine.run_cycle()
+    assert len(calls) == 2
+    assert not state['retrospective']['model_review_deferred']
+    assert any(t['id'] == trade.id for t in reviewer.context['recent_trades'])
+    engine.run_cycle()
+    assert len(calls) == 2
+    engine.store._put('mode', 'live')
+    assert engine.store.last_close_id() is None

@@ -545,6 +545,15 @@ class Store:
             )
             self._commit()
 
+    def last_close_id(self) -> str | None:
+        """Identity of the latest actual exit in the active ledger."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT id FROM trades WHERE ledger = ? AND action IN ('sell', 'settle') ORDER BY rowid DESC LIMIT 1",
+                (self._ledger(),),
+            ).fetchone()
+        return row[0] if row else None
+
     def trades(self, limit: int = 40) -> list[Trade]:
         with self.lock:
             rows = self.conn.execute(
