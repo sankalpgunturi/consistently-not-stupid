@@ -37,7 +37,7 @@ function render(next) {
   const mode = $("mode");
   mode.textContent = status;
   mode.className = next.status === "error" ? "pill off" : "pill paper";
-  $("live-mode").textContent = "Live unavailable";
+  $("live-mode").textContent = "Live planned";
   $("clock").textContent = new Date(next.server_time || Date.now()).toLocaleTimeString();
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
   $("pause").textContent = next.operator_pause ? "Resume buys" : "Pause buys";
@@ -57,23 +57,24 @@ function render(next) {
     cycle: next.cycle,
     params: next.params,
     audit: next.audit,
+    research: next.research,
   });
   if (stamp === lastStamp) return;
   lastStamp = stamp;
 
   const cards = [
-    ["Equity", money(book.equity), book.equity >= book.start ? "up" : "down"],
-    ["Cash", money(book.cash), ""],
-    ["At work", money(book.deployed), ""],
-    ["Realized", money(book.realized), book.realized > 0 ? "up" : book.realized < 0 ? "down" : ""],
-    ["Unrealized", money(book.unrealized), book.unrealized > 0 ? "up" : book.unrealized < 0 ? "down" : ""],
-    ["Fees paid", money(book.fees_paid, 2), ""],
+    ["Portfolio value", money(book.equity), ""],
+    ["Profit / loss", money((book.equity || 0) - (book.start || 0)), book.equity > book.start ? "up" : book.equity < book.start ? "down" : ""],
+    ["Win rate", next.evidence?.hit_rate == null ? "—" : `${(next.evidence.hit_rate * 100).toFixed(1)}%`, ""],
   ];
   $("stats").innerHTML = cards.map(([label, value, tone]) =>
-    `<div class="stat ${tone}"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`
+    `<div class="stat ${tone}"><span>${esc(label)}</span><strong>${esc(value)}</strong>${label === "Win rate" ? `<small>${esc(next.evidence?.resolved_count || 0)} settled</small>` : ""}</div>`
   ).join("");
+  $("paper-day").textContent = `· Day ${Math.floor(Number(next.paper_age_days || 0)) + 1}`;
+  $("starting-balance").textContent = `Started with ${money(book.start)}`;
 
   renderEvidence(next);
+  renderResearch(next.research || {});
   const old = document.querySelector(".banner");
   if (old) old.remove();
   const messages = [];
@@ -91,13 +92,21 @@ function render(next) {
   }
 
   const counts = next.counts || {};
+  let activity = `${counts.markets_read || 0} markets checked`;
+  if (next.status === "scanning") activity = "Scanning markets…";
+  else if (next.status === "error") activity = "Scan failed · retrying on schedule";
+  else if (book.entries_paused) activity = "New trades paused";
+  else if (counts.bought) activity += ` · ${counts.bought} new paper trade${counts.bought === 1 ? "" : "s"}`;
+  else if (!counts.confirmed && counts.stable) activity += " · Waiting for stronger evidence";
+  else activity += " · Watching for a qualifying trade";
+  $("run-summary").textContent = activity;
   const steps = [
     [counts.markets_read, "markets read"],
-    [counts.favorites, "at the bar"],
-    [counts.fee_ok, "fee still leaves a profit"],
-    [counts.stable, "held still"],
-    [counts.confirmed, "settled record"],
-    [counts.bought, "bought"],
+    [counts.favorites, "favorites"],
+    [counts.fee_ok, "after fees"],
+    [counts.stable, "stable"],
+    [counts.confirmed, "evidence passed"],
+    [counts.bought, "filled"],
   ];
   $("funnel").innerHTML = steps.map(([value, label]) =>
     `<div class="step"><b>${esc(value ?? "—")}</b><span>${esc(label)}</span></div>`
@@ -121,16 +130,14 @@ function render(next) {
 
 function renderEvidence(next) {
   const evidence = next.evidence || {};
-  const day = Math.floor(Number(next.paper_age_days || 0)) + 1;
-  const hit = evidence.hit_rate == null ? "—" : `${Math.round(evidence.hit_rate * 1000) / 10}%`;
-  const errors = (evidence.errors || []).length;
+  const book = next.book || {};
   const cells = [
-    [`Day ${day}`, "of the paper window"],
-    [money(evidence.pnl_after_fees), "net P&L after fees"],
-    [String(evidence.resolved_count ?? 0), "resolved"],
-    [hit, "hit rate"],
+    [money(book.cash), "cash"],
+    [money(book.deployed), "invested"],
+    [money(book.realized), "realized P&L"],
+    [money(book.unrealized), "unrealized P&L"],
+    [money(book.fees_paid), "fees"],
     [`${Math.round((evidence.drawdown || 0) * 1000) / 10}%`, "drawdown"],
-    [money(evidence.unresolved_cost), errors ? `unresolved · ${errors} venue error${errors === 1 ? "" : "s"}` : "unresolved cost"],
   ];
   $("evidence").innerHTML = cells.map(([value, label]) =>
     `<div><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`
@@ -138,14 +145,14 @@ function renderEvidence(next) {
 }
 
 function renderPositions(rows) {
-  $("position-count").textContent = rows.length ? `${rows.length} open` : "Cash is the position.";
+  $("position-count").textContent = `${rows.length} open`;
   $("positions-empty").classList.toggle("hidden", rows.length > 0);
+  $("positions").closest(".table-wrap").classList.toggle("hidden", rows.length === 0);
   $("positions").innerHTML = rows.map((row) => `
     <tr>
       <td>
-        <span class="venue">${esc(row.venue)}</span>
         <span class="title">${esc(row.title)}</span>
-        <span class="sub">${esc(row.outcome)} · ${esc(row.shares)} shares · ${esc(row.signal)}</span>
+        <span class="sub">${esc(row.side?.toUpperCase())} · ${esc(row.shares)} contracts</span>
       </td>
       <td class="num">${esc(money(row.cost_basis))}</td>
       <td class="num">${esc(money(row.mark))}</td>
@@ -208,9 +215,18 @@ function rowActions(row) {
 }
 
 function renderRetro(retro, llm) {
-  $("retro-source").textContent = llm.enabled ? `OpenAI ${llm.model} · governor still decides` : "Built-in governor";
+  $("retro-source").textContent = retro?.source === "openai" ? `OpenAI ${llm.model} · governor still decides` : "Built-in governor";
   $("retro").textContent = retro?.summary || "The note appears after the first pass.";
-  $("retro-notes").innerHTML = (retro?.notes || []).map((note) => `<li>${esc(note)}</li>`).join("");
+  const notes = [...(retro?.notes || []), ...(retro?.concerns || [])];
+  if (retro?.model_error) notes.push(retro.model_error);
+  $("retro-notes").innerHTML = notes.map((note) => `<li>${esc(note)}</li>`).join("");
+}
+
+function renderResearch(research) {
+  $("research-counts").textContent = `${research.scans_recorded || 0} scans archived · ${research.observations || 0} quote observations · ${research.distinct_contract_sides || 0} distinct contract sides`;
+  const rows = research.calibration || [];
+  $("calibration").innerHTML = rows.map(row => `<tr><td>${esc(row.bucket)}</td><td>${esc(row.samples)}</td><td>${esc(row.wins)}</td><td>${esc((row.lower_bound * 100).toFixed(1))}%</td></tr>`).join("");
+  $("research-note").textContent = rows.length ? "A bucket needs at least 30 samples, and its cautious win rate must exceed the ask, fee, and required edge. Passing the sample minimum alone does not admit a trade." : "Historical samples are still being collected. The account stays in cash until the entry rule passes.";
 }
 
 function renderModel(sim) {
@@ -267,11 +283,12 @@ function renderAudit(rows) {
 
 function renderTrades(rows) {
   $("trades-empty").classList.toggle("hidden", rows.length > 0);
-  $("trades").innerHTML = rows.map((row) => `
+  $("trades").closest(".table-wrap").classList.toggle("hidden", rows.length === 0);
+  $("trades").innerHTML = rows.slice(0, 8).map((row) => `
     <tr>
-      <td class="num">${esc(new Date(row.ts).toLocaleString())}</td>
+      <td class="num" title="${esc(new Date(row.ts).toLocaleString())}">${esc(new Date(row.ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}))}</td>
       <td>
-        <span class="venue">${esc(row.action)} · ${esc(row.venue)}</span>
+        <span class="venue">${esc(row.action === "settle" ? (row.won ? "Won" : "Lost") : row.action === "buy" ? "Opened" : row.action === "sell" ? "Closed" : row.action)}</span>
         <span class="title">${esc(row.title)}</span>
       </td>
       <td class="num">${esc(money(row.price))}</td>

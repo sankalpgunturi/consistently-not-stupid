@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import fcntl
 from datetime import datetime, timedelta, timezone
 
 import uvicorn
@@ -20,6 +21,7 @@ from cst.strategy import evaluate
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(prog="cst", description="Consistently Not Stupid")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -43,6 +45,13 @@ def main() -> None:
         _bench(settings)
         return
 
+    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep this descriptor open for the lifetime of serve/cycle/reset.
+    runner_lock = settings.db_path.with_suffix(".runner.lock").open("a")
+    try:
+        fcntl.flock(runner_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("The paper runner already owns this book. Use its dashboard controls.")
     engine = Engine(settings)
     if args.cmd == "reset":
         engine.reset()

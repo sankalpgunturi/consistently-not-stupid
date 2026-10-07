@@ -368,7 +368,7 @@ def _collapse(rows: list[_Row]) -> list[Decision]:
     }
     decisions = singles + grouped
     decisions.sort(key=lambda item: (order.get(item.reason_code, 9), -(item.edge or -1), -item.group_count))
-    return decisions[:80]
+    return decisions
 
 
 def _decision(row: _Row) -> Decision:

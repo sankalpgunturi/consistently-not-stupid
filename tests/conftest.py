@@ -1,8 +1,19 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from cst.config import Settings
+
 from cst.models import BookView, Quote, StrategyParams
 
 NOW = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch):
+    """Tests must never consume the operator's keys or call a paid model."""
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    monkeypatch.setenv("CST_OPENAI_API_KEY", "")
 
 
 def make_quote(**overrides) -> Quote:

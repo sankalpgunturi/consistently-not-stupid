@@ -294,3 +294,43 @@ td { padding: 10px 10px 10px 0; border-top: 1px solid var(--line); vertical-alig
 @media (prefers-reduced-motion: reduce) {
   .live.on i { box-shadow: none; }
 }
+
+/* The daily view leads with the account; detail stays behind disclosures. */
+h1 { font-size: clamp(1.55rem, 3vw, 2.25rem); line-height: 1.1; }
+.top { align-items: center; padding-top: 32px; }
+.stats { grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-top: 24px; }
+.stat { padding: 22px 24px; box-shadow: none; }
+.stat strong { font-size: clamp(1.7rem, 3vw, 2.65rem); }
+.stat small { display: block; color: var(--muted); margin-top: 4px; }
+.stat:first-child { border-color: rgba(224, 181, 106, 0.4); }
+.status-line { max-width: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 0.9rem; margin-top: 14px; margin-bottom: 4px; }
+.status-line #next { white-space: nowrap; border: none; background: none; padding: 0; font-size: 0.8rem; color: var(--muted); }
+.balance-chart { padding: 20px 24px 12px; }
+.balance-chart canvas { max-height: 190px; }
+.trades-layout { grid-template-columns: 1fr 1fr; }
+.layout > .card { width: 100%; }
+.empty { padding: 14px 0; margin: 0; font-size: 0.95rem; }
+.disclosure { padding: 0 20px; background: transparent; box-shadow: none; margin-top: 12px; }
+.disclosure > summary { cursor: pointer; padding: 16px 0; color: var(--dim); font-size: 0.95rem; }
+.disclosure[open] { padding-bottom: 20px; }
+.disclosure > .evidence, .disclosure > .funnel, .disclosure .coverage, .disclosure .vision { width: 100%; }
+.disclosure .funnel { grid-template-columns: repeat(6, 1fr); }
+.section-heading { margin-top: 24px; }
+.inner-disclosure { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 18px; }
+.inner-disclosure > summary { cursor: pointer; color: var(--dim); margin-bottom: 12px; }
+.inner-disclosure .table-wrap { margin: 16px 0; }
+.controls-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 20px; }
+.reset-control { margin-top: 20px; }
+.foot { padding-top: 20px; font-size: 0.78rem; }
+summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); outline-offset: 4px; }
+@media (max-width: 760px) {
+  .top { display: block; }
+  .top-meta { margin-top: 16px; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat:first-child { grid-column: 1 / -1; }
+  .stat { padding: 16px; }
+  .stat:first-child strong { font-size: 2.5rem; }
+  .trades-layout { grid-template-columns: 1fr; }
+  .status-line { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .disclosure .funnel { grid-template-columns: repeat(2, 1fr); }
+}

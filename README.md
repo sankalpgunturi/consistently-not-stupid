@@ -6,7 +6,7 @@
 
 A paper trading desk for high-probability Kalshi contracts. It starts with $1,000 of simulated cash, reads the public book, and buys only when a favorite still makes sense after the Kalshi fee and the settled record. The aim is to avoid the stupid trade, not to invent a clever one.
 
-The process never places an order. A Kalshi key is not required for the paper book. Public market data is enough.
+This month is a paper evaluation of the algorithm, with live trading planned for a later version. The current process places simulated trades only. A Kalshi key is not required for the paper book. Public market data is enough. Finishing the month does not automatically enable real orders.
 
 ## The rule
 
@@ -36,13 +36,17 @@ cst serve
 
 Open http://127.0.0.1:8000.
 
+For continuous operation on this Mac, run `.venv/bin/python tools/paper_service.py install`. The macOS service starts at login, restarts after a crash, and prevents idle sleep while running. It reads `.env` from this checkout. Keep the Mac powered, awake, and connected; closing a laptop lid or shutting it down can interrupt the run. Use `status`, `restart`, or `stop` in place of `install` to manage the service. A restart loads code changes without resetting the account.
+
+The runner scans every ten minutes and marks open positions every minute. Its log is `data/logs/runner.log`; the account and research record live in `data/book.sqlite`. Scans retain settings, calibration, counts, refusals, equity, and favorite quote observations. Trade records contain fills, fees, exits, and settlements. Retrospectives retain model concerns, proposed and applied changes, and model failures. These records are local and ignored by Git.
+
 `cst cycle` runs one scan in the terminal. `cst simulate` prints the separate model described below. `cst reset` returns the paper book to the starting cash and starts the paper window over. `cst bench` times the admission rule on a fixed fixture and, if a key is set, one Decisions call. It does not write the book.
 
 Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or the 10-minute scan. After the first run, learned knobs live in `data/book.sqlite` and survive a restart. The environment values are the seed, and the reset command restores them.
 
 ## What the dashboard is showing
 
-The status line stays **Paper** and **Live unavailable**. There is no control that arms a live order. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips.
+The status line stays **Paper** and **Live planned**. There is no control that arms a live order. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips. The simulation record shows archived observations and historical sample sizes separately from this account's results. A fill is an open position, not a confirmed win.
 
 The funnel is the scan: markets read, quotes at the bar, quotes the fee still leaves a profit on, quotes that held still, quotes the settled record calls cheap, and clips actually bought. The counts are the first pages of open Kalshi markets, not every contract.
 

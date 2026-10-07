@@ -9,6 +9,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import contextmanager
 
 from cst.models import BookView, Decision, Position, Settlement, StrategyParams, Trade, utcnow
 from cst.strategy import price_bucket
@@ -30,10 +31,34 @@ class Store:
         self.bankroll = float(bankroll)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self._transaction_depth = 0
         self._init()
         self._seed(params)
         self._ensure_controls()
+
+    def _commit(self) -> None:
+        if self._transaction_depth == 0:
+            self.conn.commit()
+
+    @contextmanager
+    def transaction(self):
+        """Commit a fill and all its accounting together, or roll it all back."""
+        with self.lock:
+            outer = self._transaction_depth == 0
+            if outer:
+                self.conn.execute("BEGIN IMMEDIATE")
+            self._transaction_depth += 1
+            try:
+                yield
+                if outer:
+                    self.conn.commit()
+            except BaseException:
+                if outer:
+                    self.conn.rollback()
+                raise
+            finally:
+                self._transaction_depth -= 1
 
     def _init(self) -> None:
         self.conn.executescript(
@@ -64,6 +89,13 @@ class Store:
             CREATE TABLE IF NOT EXISTS retrospectives (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TEXT, payload TEXT
+            );
+            CREATE TABLE IF NOT EXISTS scans (
+                cycle INTEGER PRIMARY KEY, ts TEXT NOT NULL, payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS observations (
+                cycle INTEGER NOT NULL, quote_key TEXT NOT NULL, payload TEXT NOT NULL,
+                PRIMARY KEY (cycle, quote_key)
             );
             CREATE TABLE IF NOT EXISTS stability (
                 key TEXT PRIMARY KEY,
@@ -118,7 +150,7 @@ class Store:
             self.conn.execute("ALTER TABLE venue_markets ADD COLUMN resume_max_ts INTEGER")
         self._reconcile_foreign_positions()
         self._migrate_legacy_history()
-        self.conn.commit()
+        self._commit()
 
     def _reconcile_foreign_positions(self) -> None:
         """Close clips from a venue this desk no longer marks.
@@ -208,7 +240,7 @@ class Store:
                 self._put("blocked", [])
                 self._put("operator_pause", False)
                 self.conn.execute("INSERT INTO equity (ts, equity) VALUES (?, ?)", (_iso(), self.bankroll))
-                self.conn.commit()
+                self._commit()
 
     def _ensure_controls(self) -> None:
         with self.lock:
@@ -220,7 +252,7 @@ class Store:
                 self._put("blocked", [])
             if self._get("operator_pause") is None:
                 self._put("operator_pause", False)
-            self.conn.commit()
+            self._commit()
 
     def _put(self, key: str, value) -> None:
         self.conn.execute(
@@ -242,7 +274,7 @@ class Store:
     def save_params(self, params: StrategyParams) -> None:
         with self.lock:
             self._put("params", params.to_json())
-            self.conn.commit()
+            self._commit()
 
     def revise_params(self, revise):
         """Read, revise, and write params under one lock.
@@ -256,7 +288,7 @@ class Store:
             updated, notes, applied = revise(current)
             if applied:
                 self._put("params", updated.to_json())
-                self.conn.commit()
+                self._commit()
             return updated, notes, applied
 
     def governor_seen(self) -> int:
@@ -266,7 +298,7 @@ class Store:
     def set_governor_seen(self, count: int) -> None:
         with self.lock:
             self._put("governor_seen", int(count))
-            self.conn.commit()
+            self._commit()
 
     def cash(self) -> float:
         with self.lock:
@@ -275,12 +307,12 @@ class Store:
     def set_cash(self, cash: float) -> None:
         with self.lock:
             self._put("cash", round(float(cash), 6))
-            self.conn.commit()
+            self._commit()
 
     def add_fee(self, fee: float) -> None:
         with self.lock:
             self._put("fees_paid", round(float(self._get("fees_paid", 0)) + fee, 6))
-            self.conn.commit()
+            self._commit()
 
     def fees_paid(self) -> float:
         with self.lock:
@@ -293,7 +325,7 @@ class Store:
     def add_realized(self, pnl: float) -> None:
         with self.lock:
             self._put("realized", round(float(self._get("realized", 0)) + pnl, 6))
-            self.conn.commit()
+            self._commit()
 
     def peak(self) -> float:
         with self.lock:
@@ -305,14 +337,14 @@ class Store:
             if equity > peak:
                 peak = equity
                 self._put("peak", round(peak, 6))
-                self.conn.commit()
+                self._commit()
             return peak
 
     def next_cycle(self) -> int:
         with self.lock:
             cycle = int(self._get("cycle", 0)) + 1
             self._put("cycle", cycle)
-            self.conn.commit()
+            self._commit()
             return cycle
 
     def cycle(self) -> int:
@@ -324,7 +356,7 @@ class Store:
             self._put("status", status)
             if extra is not None:
                 self._put("cycle_info", extra)
-            self.conn.commit()
+            self._commit()
 
     def status(self) -> str:
         with self.lock:
@@ -356,7 +388,7 @@ class Store:
                     (key, streak, cycle),
                 )
             self.conn.execute("DELETE FROM stability WHERE last_cycle < ?", (cycle - 12,))
-            self.conn.commit()
+            self._commit()
             return streaks
 
     def positions(self) -> list[Position]:
@@ -383,12 +415,12 @@ class Store:
                     position.fee_exponent, position.url, position.opened_at,
                 ),
             )
-            self.conn.commit()
+            self._commit()
 
     def delete_position(self, position_id: str) -> None:
         with self.lock:
             self.conn.execute("DELETE FROM positions WHERE id = ?", (position_id,))
-            self.conn.commit()
+            self._commit()
 
     def add_trade(self, trade: Trade) -> None:
         with self.lock:
@@ -405,7 +437,7 @@ class Store:
                     trade.pnl, trade.cash_after, trade.signal, trade.reason, trade.won,
                 ),
             )
-            self.conn.commit()
+            self._commit()
 
     def trades(self, limit: int = 40) -> list[Trade]:
         with self.lock:
@@ -421,7 +453,7 @@ class Store:
                 "INSERT INTO equity (ts, equity) VALUES (?, ?)",
                 (_iso(ts), round(float(equity), 6)),
             )
-            self.conn.commit()
+            self._commit()
 
     def equity_curve(self, limit: int = 400) -> list[dict]:
         with self.lock:
@@ -439,7 +471,7 @@ class Store:
                     "INSERT INTO decisions (cycle, payload) VALUES (?, ?)",
                     [(cycle, json.dumps(item.to_json())) for item in decisions],
                 )
-            self.conn.commit()
+            self._commit()
 
     def decisions(self, limit: int = 80) -> list[dict]:
         with self.lock:
@@ -467,7 +499,7 @@ class Store:
                     row.market_id or "",
                 ),
             )
-            self.conn.commit()
+            self._commit()
 
     def settlements(self) -> list[Settlement]:
         with self.lock:
@@ -506,12 +538,13 @@ class Store:
         payload = {bucket: [int(wins), int(count)] for bucket, (wins, count) in counts.items()}
         with self.lock:
             self._put("venue_record", payload)
-            self.conn.commit()
+            self._commit()
 
     def venue_checked(self, hours: float) -> set[str]:
         """Tickers whose stored trades already answer this horizon."""
         with self.lock:
             self._score_covered(hours)
+            self._commit()
             rows = self.conn.execute(
                 "SELECT ticker FROM venue_samples WHERE hours = ?",
                 (_hours_key(hours),),
@@ -551,7 +584,7 @@ class Store:
             hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
             self._score_covered(hours)
             self._put("venue_record", self._record_payload(hours))
-            self.conn.commit()
+            self._commit()
 
     def _merge_sample(self, ticker: str, row: dict) -> None:
         trades = row.get("trades")
@@ -733,6 +766,7 @@ class Store:
         with self.lock:
             hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
             self._score_covered(hours)
+            self._commit()
             found: dict[str, list[int]] = {}
             if self._has_samples():
                 for bucket, (wins, count) in self._grouped(hours).items():
@@ -755,7 +789,25 @@ class Store:
                 "INSERT INTO retrospectives (ts, payload) VALUES (?, ?)",
                 (_iso(), json.dumps(payload)),
             )
-            self.conn.commit()
+            self._commit()
+
+    def save_scan(self, cycle: int, payload: dict, observations: list[dict]) -> None:
+        """Keep the evidence needed to reproduce a scan's admissions and refusals."""
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO scans VALUES (?, ?, ?)", (cycle, _iso(), json.dumps(payload)))
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO observations VALUES (?, ?, ?)",
+                [(cycle, row["key"], json.dumps(row)) for row in observations],
+            )
+            self._commit()
+
+    def research_summary(self) -> dict:
+        with self.lock:
+            scans = self.conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+            observations = self.conn.execute("SELECT COUNT(*), COUNT(DISTINCT quote_key) FROM observations").fetchone()
+            rows = self.conn.execute("SELECT ts, payload FROM scans ORDER BY cycle DESC LIMIT 12").fetchall()
+        return {"scans_recorded": scans, "observations": observations[0], "distinct_contract_sides": observations[1],
+                "recent_scans": [dict(json.loads(row["payload"]), ts=row["ts"]) for row in rows]}
 
     def retros(self, limit: int = 8) -> list[dict]:
         with self.lock:
@@ -789,7 +841,7 @@ class Store:
     def set_pause(self, paused: bool) -> None:
         with self.lock:
             self._put("operator_pause", bool(paused))
-            self.conn.commit()
+            self._commit()
 
     def block(self, key: str, reason: str) -> None:
         with self.lock:
@@ -798,12 +850,12 @@ class Store:
                 blocked.append(key)
                 self._put("blocked", blocked)
             self._audit("operator", "block", "", key, reason)
-            self.conn.commit()
+            self._commit()
 
     def append_audit(self, actor: str, action: str, old, new, reason: str) -> None:
         with self.lock:
             self._audit(actor, action, old, new, reason)
-            self.conn.commit()
+            self._commit()
 
     def _audit(self, actor: str, action: str, old, new, reason: str) -> None:
         self.conn.execute(
@@ -856,9 +908,9 @@ class Store:
     def reset(self, params: StrategyParams) -> None:
         """Clear this paper book. The venue trade record is kept."""
         with self.lock:
-            for table in ("positions", "trades", "decisions", "equity", "retrospectives", "stability", "settlements", "audit", "meta"):
+            for table in ("positions", "trades", "decisions", "equity", "retrospectives", "scans", "observations", "stability", "settlements", "audit", "meta"):
                 self.conn.execute(f"DELETE FROM {table}")
-            self.conn.commit()
+            self._commit()
         self._seed(params)
 
 

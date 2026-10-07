@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from functools import wraps
 
 from cst.fees import fee_for
 from cst.models import Position, Quote, Trade
@@ -19,10 +20,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _atomic(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.store.transaction():
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class PaperBroker:
     def __init__(self, store: Store):
         self.store = store
 
+    @_atomic
     def buy(self, quote: Quote, shares: float, signal: str, reason: str, cycle: int) -> Trade | None:
         fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
         cost = shares * quote.ask + fee
@@ -77,7 +87,10 @@ class PaperBroker:
         self.store.add_trade(trade)
         return trade
 
+    @_atomic
     def sell(self, position: Position, bid: float, reason: str) -> Trade | None:
+        if not any(row.id == position.id for row in self.store.positions()):
+            return None
         # Zero is a real bid on a pinned book. A missing book never reaches here.
         if bid < 0 or bid > 1:
             return None
@@ -108,7 +121,10 @@ class PaperBroker:
         self.store.add_trade(trade)
         return trade
 
-    def settle(self, position: Position, won: bool) -> Trade:
+    @_atomic
+    def settle(self, position: Position, won: bool) -> Trade | None:
+        if not any(row.id == position.id for row in self.store.positions()):
+            return None
         proceeds = position.shares * (1.0 if won else 0.0)
         pnl = proceeds - position.cost_basis
         cash = round(self.store.cash() + proceeds, 6)

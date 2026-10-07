@@ -520,7 +520,7 @@ def test_dashboard_and_health(tmp_path):
         assert "Consistently Not Stupid" in page.text
         assert "instead of trying to be very intelligent" in page.text
         assert "Scan now" in page.text
-        assert "Live unavailable" in page.text
+        assert "Live planned" in page.text
         assert "Pause buys" in page.text
         assert "Kalshi" in page.text
         assert "Polymarket" not in page.text

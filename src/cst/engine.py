@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import Counter
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 from cst.broker import PaperBroker
@@ -15,7 +17,7 @@ from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out
+from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
 
 log = logging.getLogger("cst.engine")
@@ -81,6 +83,12 @@ class Engine:
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._next_scan = datetime.now(timezone.utc)
+        saved_next = self.store.cycle_info().get("next_scan_at")
+        if saved_next:
+            try:
+                self._next_scan = datetime.fromisoformat(saved_next)
+            except (TypeError, ValueError):
+                pass
         self._report: dict | None = None
         self._sim_started = False
         self._report_lock = threading.Lock()
@@ -119,6 +127,8 @@ class Engine:
             return self._report
 
     def _loop(self) -> None:
+        # Restarting to load a fix must not manufacture another stable scan.
+        self._wait_for_scan()
         while not self._stop.is_set():
             try:
                 self.run_cycle()
@@ -130,15 +140,20 @@ class Engine:
             params = self.store.params()
             self._next_scan = datetime.now(timezone.utc) + timedelta(seconds=params.scan_interval_seconds)
             self.store.set_status(self.store.status() if self.store.status() != "scanning" else "watching", self.store.cycle_info() | {"next_scan_at": self._next_scan.isoformat(timespec="seconds")})
-            deadline = time.time() + params.scan_interval_seconds
-            while time.time() < deadline and not self._stop.is_set():
-                if self._wake.wait(timeout=min(params.mark_interval_seconds, max(0.1, deadline - time.time()))):
-                    self._wake.clear()
-                    break
-                try:
-                    self.mark_open()
-                except Exception:
-                    log.exception("mark failed")
+            self._wait_for_scan()
+
+    def _wait_for_scan(self) -> None:
+        delay = max(0, (self._next_scan - datetime.now(timezone.utc)).total_seconds())
+        deadline = time.monotonic() + delay
+        while time.monotonic() < deadline and not self._stop.is_set():
+            interval = self.store.params().mark_interval_seconds
+            if self._wake.wait(timeout=min(interval, max(0.1, deadline - time.monotonic()))):
+                self._wake.clear()
+                break
+            try:
+                self.mark_open()
+            except Exception:
+                log.exception("mark failed")
 
     def run_cycle(self) -> dict:
         if not self._lock.acquire(blocking=False):
@@ -170,7 +185,19 @@ class Engine:
         result = evaluate(quotes, params, book)
         veto = self._veto(result.proposals)
         kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
+        if isinstance(self.reviewer, Reviewer):
+            self.reviewer.context = {
+                "phase": "before fills",
+                "equity": book.equity, "cash": book.cash,
+                "positions": [item.to_json() for item in book.positions],
+                "recent_trades": [item.to_json() for item in self.store.trades(20)],
+                "calibration": book.calibration,
+                "venue_errors": errors,
+                "refusals": dict(Counter(item.reason_code for item in result.decisions)),
+            }
         drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
+        if getattr(self.reviewer, "last_error", None):
+            errors.append(self.reviewer.last_error)
         kept, dropped_decisions = drop_proposals(kept, drops)
         decisions = [item for item in result.decisions if item.action != "bought"]
         decisions = vetoed + dropped_decisions + decisions
@@ -230,6 +257,8 @@ class Engine:
             filled.add(proposal.key)
         buys = [item for item in result.decisions if item.action == "bought" and item.key in filled]
         decisions = buys + decisions
+        if result.focus and result.focus.action == "bought" and result.focus.key not in filled:
+            result.focus = next((item for item in decisions if item.key == result.focus.key), None)
         self.mark_open(locked=True)
         settlements = self.store.settlements()
         seen = self.store.governor_seen()
@@ -262,10 +291,17 @@ class Engine:
             "applied": applied,
             "notes": notes,
             "source": "openai" if self.reviewer.enabled and (model_summary or suggestions or drops) else "governor",
+            "concerns": getattr(self.reviewer, "concerns", []),
+            "model_error": getattr(self.reviewer, "last_error", None),
+            "cycle": cycle,
+            "actual_bought": bought,
+            "proposed_updates": suggestions,
+            "settlements_seen": len(settlements),
         }
+        retro["notes"].insert(0, f"Execution: {bought} paper buys; {len(settlements)} settlements recorded. Model commentary is a pre-fill review.")
         self.store.add_retro(retro)
         result.counts["bought"] = bought
-        self.store.save_decisions(cycle, decisions[:80])
+        self.store.save_decisions(cycle, decisions)
         equity = self.store.mark_equity()
         self.store.note_peak(equity)
         self.store.add_equity(equity)
@@ -278,6 +314,21 @@ class Engine:
             "focus": result.focus.to_json() if result.focus else None,
             "next_scan_at": (datetime.now(timezone.utc) + timedelta(seconds=updated.scan_interval_seconds)).isoformat(timespec="seconds"),
         }
+        observations = []
+        for quote in quotes:
+            if max(quote.bid, quote.ask) < params.min_probability:
+                continue
+            row = asdict(quote)
+            row["key"] = quote.key
+            row["end_time"] = quote.end_time.isoformat() if quote.end_time else None
+            observations.append(row)
+        self.store.save_scan(cycle, {
+            **info, "params": params.to_json(), "params_after": updated.to_json(),
+            "equity": round(equity, 4), "cash": self.store.cash(),
+            "calibration": book.calibration,
+            "refusals": dict(Counter(item.reason_code for item in decisions if item.action != "bought")),
+        }, observations)
+        log.info("Scan %s: equity $%.2f, favorites %s, bought %s, errors %s", cycle, equity, result.counts.get("favorites", 0), bought, len(errors))
         self._next_scan = datetime.fromisoformat(info["next_scan_at"])
         paused = self._paused(updated)
         self.store.set_status("paused" if paused else "watching", info)
@@ -294,8 +345,10 @@ class Engine:
                     continue
                 if quote.settled and quote.winner in {"yes", "no"}:
                     won = quote.winner == position.side
-                    trade = self.broker.settle(position, won)
-                    self._record_settlement(position, won, trade.pnl)
+                    with self.store.transaction():
+                        trade = self.broker.settle(position, won)
+                        if trade is not None:
+                            self._record_settlement(position, won, trade.pnl)
                     continue
                 self.broker.mark(position, quote.bid)
                 if 0 <= quote.bid <= position.entry_price - params.stop_gap:
@@ -486,6 +539,11 @@ class Engine:
                 "adjustable": key != "scan_interval_seconds",
             })
         retros = self.store.retros(6)
+        research = self.store.research_summary()
+        research["calibration"] = [
+            {"bucket": bucket, "wins": wins, "samples": count, "lower_bound": wilson_lower(wins, count)}
+            for bucket, (wins, count) in sorted(self.store.calibration().items())
+        ]
         return {
             "name": "Consistently Not Stupid",
             "mode": "paper",
@@ -528,6 +586,7 @@ class Engine:
             "params": param_rows,
             "retrospective": retros[0] if retros else None,
             "retrospective_history": retros,
+            "research": research,
             "cycle": {
                 "number": info.get("number", self.store.cycle()),
                 "duration_seconds": info.get("duration_seconds"),
