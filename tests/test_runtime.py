@@ -257,3 +257,17 @@ def test_report_keeps_research_payoffs_out_of_paper_ledger(tmp_path):
     assert result['opened_trades']==0
     assert result['realized_pnl']==0
     assert all(result['ledger_checks'].values())
+
+
+def test_priority_window_uses_larger_pages_without_expanding_broad_requests():
+    calls=[]
+    class Http:
+        def get_json(self,_url,params=None):
+            calls.append(dict(params))
+            return {'markets':[], 'cursor':''}
+    quotes,error=fetch_kalshi('https://example.invalid',8,200,http=Http(),
+        close_windows=[(100,200),(200,300),None],priority_page_size=1000)
+    assert quotes==[] and error is None
+    assert [c['limit'] for c in calls]==['1000','200','200']
+    assert calls[0]['max_close_ts']=='200'
+    assert calls[-1]['status']=='open'

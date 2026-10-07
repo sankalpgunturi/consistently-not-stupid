@@ -57,7 +57,7 @@ def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
         # Close-time is a discovery hint only; entry requires expected resolution.
         windows = [(int(now), int(now + 600)), (int(now + 600), int(now + 3600)),
                    (int(now + 3600), int(now + 86400)), None]
-    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_windows=windows)
+    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_windows=windows, priority_page_size=1000 if settings.entry_window_minutes > 0 else None)
     return quotes, [err] if err else []
 
 

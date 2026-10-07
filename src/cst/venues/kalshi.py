@@ -171,7 +171,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     return quotes
 
 
-def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int]] | None = None) -> tuple[list[Quote], str | None]:
+def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int] | None] | None = None, priority_page_size: int | None = None) -> tuple[list[Quote], str | None]:
     own = http is None
     client = http or MarketHttp()
     quotes: list[Quote] = []
@@ -185,10 +185,11 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
         for index in range(max(0, pages)):
             budgets[pattern[index % len(pattern)]] += 1
         unique: dict[str, dict] = {}
-        for window, budget in zip(windows, budgets):
+        for window_index, (window, budget) in enumerate(zip(windows, budgets)):
             cursor = ""
             for _ in range(budget):
-                params = {"status": "open", "limit": str(page_size), "mve_filter": "exclude"}
+                limit = min(1000, max(page_size, priority_page_size or page_size)) if window_index == 0 else page_size
+                params = {"status": "open", "limit": str(limit), "mve_filter": "exclude"}
                 if window is not None:
                     # Close-time filters cannot be combined with status=open.
                     params.pop("status")
