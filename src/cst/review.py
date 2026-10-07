@@ -78,12 +78,13 @@ def heuristic_summary(counts: dict[str, int], bought: int) -> str:
     favorites = counts.get("favorites", 0)
     if favorites == 0:
         return "No live quote had both sides of the book at the probability bar."
+    if counts.get("fee_ok", 0) == 0:
+        return "No favorite passed all the fee, timing, liquidity and size checks."
+    if counts.get("stable", 0) == 0:
+        return "Candidates need more consecutive qualifying scans before an entry."
     if counts.get("confirmed", 0) == 0:
-        return (
-            "Favorites were on the board. None were cheap versus the settled record, "
-            "so the book stayed in cash."
-        )
-    return "A price looked cheap, then the portfolio rules set it aside as a twin, a cap, or a pause."
+        return "No stable candidate had enough evidence of an edge after fees."
+    return "No trade was filled after portfolio, review and execution checks."
 
 
 def _loosening(key: str, old: float, new: float) -> bool:
