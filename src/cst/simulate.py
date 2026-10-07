@@ -2,7 +2,7 @@
 
 Two worlds. In the fair world the quote is the true chance, so a favorite
 bought at the ask loses the fee. In the dislocated world some favorites are
-a few cents under a second venue. The common-sense rule trades only there.
+a few cents under a second venue. This desk trades only there.
 """
 
 from __future__ import annotations
@@ -98,8 +98,8 @@ def _downsample(curve: list[float], points: int = 40) -> list[float]:
 def run_report(seed: int = 7, paths: int = 200, markets: int = 90, bankroll: float = 1000) -> dict:
     specs = (
         ("naive", "fair", "Buy every 90% quote", "The quote is the true chance"),
-        ("common", "fair", "Common sense", "The quote is the true chance"),
-        ("common", "dislocated", "Common sense", "Some second venues are a few cents higher"),
+        ("common", "fair", "Consistently not stupid", "The quote is the true chance"),
+        ("common", "dislocated", "Consistently not stupid", "Some second venues are a few cents higher"),
     )
     books = []
     curves = {}

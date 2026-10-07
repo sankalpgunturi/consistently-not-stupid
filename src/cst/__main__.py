@@ -20,7 +20,7 @@ from cst.strategy import evaluate, pair_id
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    parser = argparse.ArgumentParser(prog="cst", description="The Common Sense Trade")
+    parser = argparse.ArgumentParser(prog="cst", description="Consistently not Stupid")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     serve = sub.add_parser("serve", help="Run the paper desk and the dashboard")

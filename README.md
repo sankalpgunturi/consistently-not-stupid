@@ -1,6 +1,10 @@
-# The Common Sense Trade
+# Consistently not Stupid
 
-A paper trading desk for high-probability contracts on Kalshi and Polymarket. It starts with $1,000 of simulated cash, reads the public books, and buys only when a favorite still makes sense after the venue fee.
+> It is remarkable how much long-term advantage people like us have gotten by trying to be consistently not stupid, instead of trying to be very intelligent.
+>
+> Charlie Munger
+
+A paper trading desk for high-probability contracts on Kalshi and Polymarket. It starts with $1,000 of simulated cash, reads the public books, and buys only when a favorite still makes sense after the venue fee. The aim is to avoid the stupid trade, not to invent a clever one.
 
 The process never places an order. Kalshi and Polymarket keys are not required for the paper book. Public market data is enough.
 

@@ -1,6 +1,6 @@
 # Phases
 
-Living log for The Common Sense Trade. Update this file at the end of each phase. Do not treat it as a design spec; the spec is `docs/ARCHITECTURE.md` once that exists. Gaps the operator should argue with are in `docs/GAPS.md`.
+Living log for Consistently not Stupid. Update this file at the end of each phase. Do not treat it as a design spec; the spec is `docs/ARCHITECTURE.md` once that exists. Gaps the operator should argue with are in `docs/GAPS.md`.
 
 ## Intent
 

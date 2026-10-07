@@ -367,7 +367,7 @@ class Engine:
             })
         retros = self.store.retros(6)
         return {
-            "name": "The Common Sense Trade",
+            "name": "Consistently not Stupid",
             "mode": "paper",
             "live": "unavailable",
             "csrf": self.store.csrf(),

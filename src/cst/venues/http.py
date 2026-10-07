@@ -13,7 +13,7 @@ class MarketHttp:
             timeout=timeout,
             follow_redirects=True,
             headers={
-                "User-Agent": "common-sense-trade/0.1",
+                "User-Agent": "consistently-not-stupid/0.1",
                 "Accept": "application/json",
             },
         )
