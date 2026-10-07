@@ -590,7 +590,7 @@ class Engine:
     def _veto(self, proposals) -> dict[str, str]:
         if self.decider is not None:
             return self.decider(proposals)
-        return veto_proposals(proposals, self.settings.openai_api_key, usage_sink=lambda usage: setattr(self, "_veto_usage", usage))
+        return veto_proposals(proposals, self.settings.openai_api_key, positions=self.store.positions(), usage_sink=lambda usage: setattr(self, "_veto_usage", usage))
 
     def set_pause(self, paused: bool) -> dict:
         old = self.store.operator_pause()

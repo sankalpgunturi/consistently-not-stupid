@@ -11,7 +11,7 @@ import logging
 
 import httpx
 
-from cst.models import Proposal
+from cst.models import Position, Proposal
 
 log = logging.getLogger("cst.decisions")
 
@@ -20,7 +20,7 @@ DROP_FLOOR = 0.6
 ENDPOINT = "https://api.openai.com/v1/decisions"
 
 
-def build_request(proposals: list[Proposal]) -> tuple[dict, dict[str, str]]:
+def build_request(proposals: list[Proposal], positions: list[Position] | None = None) -> tuple[dict, dict[str, str]]:
     name_to_key: dict[str, str] = {}
     questions = []
     lines = []
@@ -29,24 +29,27 @@ def build_request(proposals: list[Proposal]) -> tuple[dict, dict[str, str]]:
         name_to_key[name] = proposal.key
         quote = proposal.quote
         lines.append(
-            f"{name}: {quote.venue} | {quote.title} | {quote.outcome} | "
+            f"{name}: {quote.venue} | {quote.title} | {quote.outcome} | side {quote.side} | "
             f"ask {quote.ask:.3f} | {proposal.signal} | {proposal.detail}"
         )
         questions.append({
             "type": "choice",
             "name": name,
             "instructions": (
-                "Is this clip the same risk, or the logical opposite, of another clip in the input? "
+                "Is this clip the same risk, or the logical opposite, of another proposed clip or an already-open position in the input? "
                 "Choose drop only in that case. Choose keep when the favorite is a distinct contract."
             ),
             "choices": [
                 {"value": "keep", "description": "Distinct risk. Leave the clip in the set."},
-                {"value": "drop", "description": "Duplicate or logical opposite of another proposed clip."},
+                {"value": "drop", "description": "Duplicate or logical opposite of a proposed clip or open position."},
             ],
         })
+    held = [f"h{index}: {p.venue} | {p.title} | {p.outcome} | side {p.side} | {p.shares:g} contracts"
+            for index, p in enumerate(positions or [])]
+    context = "Already-open positions (context only; do not propose exits):\n" + ("\n".join(held) or "None")
     body = {
         "model": MODEL,
-        "input": "Proposed paper clips:\n" + "\n".join(lines),
+        "input": context + "\n\nProposed paper clips:\n" + "\n".join(lines),
         "questions": questions,
     }
     return body, name_to_key
@@ -105,10 +108,10 @@ def parse_veto(body, name_to_key: dict[str, str]) -> dict[str, str]:
     return drops
 
 
-def veto_proposals(proposals: list[Proposal], api_key: str, timeout: float = 20, usage_sink=None) -> dict[str, str]:
+def veto_proposals(proposals: list[Proposal], api_key: str, timeout: float = 20, usage_sink=None, positions: list[Position] | None = None) -> dict[str, str]:
     if not api_key.strip() or not proposals:
         return {}
-    body, mapping = build_request(proposals)
+    body, mapping = build_request(proposals, positions)
     try:
         response = httpx.post(
             ENDPOINT,

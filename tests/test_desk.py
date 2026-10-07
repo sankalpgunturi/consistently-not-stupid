@@ -1350,3 +1350,20 @@ def test_direction_templates_compare_assets_not_boilerplate():
     assert score('BTC price up in next 15 mins?', 'Bitcoin price down in next 15 minutes?') == 1
     # Same-event identity wins even when the displayed asset names differ.
     assert score('BTC price up in next 15 mins?', 'GBP/USD price up in next 15 mins?', 'a') == 1
+
+
+def test_model_correlation_sees_open_positions_but_only_votes_on_new_buys(tmp_path):
+    from cst.decisions import build_request
+    from cst.models import Proposal
+    store = Store(tmp_path / 'book.sqlite', StrategyParams(), 1000)
+    held = make_quote(title='Existing held contract', side='no')
+    PaperBroker(store).buy(held, 1, 'paper_favorite', 'fixture', 0)
+    proposed = Proposal(quote=make_quote(market_id='new', title='Proposed contract'),
+                        shares=1, edge=0, signal='paper_favorite', detail='fixture', confirm='fixture')
+    body, mapping = build_request([proposed], store.positions())
+    assert 'Existing held contract' in body['input']
+    assert 'side no' in body['input']
+    assert 'do not propose exits' in body['input']
+    assert [q['name'] for q in body['questions']] == ['c0']
+    assert mapping == {'c0': proposed.key}
+    assert parse_veto({'answers': [{'name': 'h0', 'choice': 'drop', 'probabilities': {'drop': .99}}]}, mapping) == {}
