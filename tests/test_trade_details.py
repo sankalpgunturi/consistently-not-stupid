@@ -142,3 +142,25 @@ def test_probability_stop_uses_last_tradable_window(remaining,expected,bid,trada
     assert bool(reason) is trigger
     if reason:
         assert 'NO' in reason
+
+
+@pytest.mark.parametrize('bid,closed', [(.004, False), (.01, False), (.011, True)])
+def test_auto_exit_requires_positive_recovery_after_fee(tmp_path,bid,closed):
+    import json
+    from datetime import datetime, timezone
+    from cst.depth import DepthResult
+    engine=Engine(Settings(data_dir=str(tmp_path),stop_loss_minutes=2),fetcher=lambda _: ([],[]))
+    PaperBroker(engine.store).buy(make_quote(ask=.9),1,'paper_favorite','test',0)
+    engine.refresher=lambda *_:make_quote(bid=bid,ask=bid+.01,end_time=datetime.now(timezone.utc)+timedelta(seconds=90))
+    depth_calls=[]
+    engine.depth=lambda *_:depth_calls.append(True) or DepthResult(True,1,'covered')
+    before=engine.store.cash()
+    engine.mark_open()
+    assert (not engine.store.positions()) is closed
+    assert bool(depth_calls) is closed
+    observation=json.loads(engine.store.conn.execute('SELECT payload FROM position_quotes').fetchone()[0])
+    assert bool(observation['execution_block']) is not closed
+    if closed:
+        assert engine.store.cash()>before
+    else:
+        assert engine.store.cash()==before

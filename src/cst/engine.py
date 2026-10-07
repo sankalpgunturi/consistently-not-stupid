@@ -541,9 +541,15 @@ class Engine:
                 if params.entry_window_minutes == 0:
                     reason = (f"Stop-loss: bid {quote.bid:.2f} fell {params.stop_gap * 100:g} cents below entry."
                               if 0 <= quote.bid <= position.entry_price - params.stop_gap else None)
-                depth = self.check_depth(quote, position.shares, "sell") if reason else None
-                self.store.record_position_quote(position.id, quote, reason, depth)
-                if reason and depth.ok:
+                execution_block = None
+                if reason and params.entry_window_minutes > 0:
+                    exit_fee = float(fee_for(position.fee_model, position.shares, quote.bid,
+                                             position.fee_rate, position.fee_exponent))
+                    if position.shares * quote.bid <= exit_fee + 1e-12:
+                        execution_block = "Sale proceeds would not exceed the exit fee; holding avoids a zero-or-negative recovery."
+                depth = self.check_depth(quote, position.shares, "sell") if reason and not execution_block else None
+                self.store.record_position_quote(position.id, quote, reason, depth, execution_block)
+                if reason and depth is not None and depth.ok:
                     self._execute_sell(position, quote.bid, reason)
             equity = self.store.mark_equity()
             self.store.note_peak(equity)

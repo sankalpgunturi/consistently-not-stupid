@@ -309,11 +309,11 @@ class Store:
             return default
         return json.loads(row["value"])
 
-    def record_position_quote(self, position_id, quote, reason, depth):
+    def record_position_quote(self, position_id, quote, reason, depth, execution_block=None):
         payload = {"market_id": quote.market_id, "side": quote.side,
                    "bid": quote.bid, "ask": quote.ask, "bid_size": quote.bid_size,
                    "close": quote.end_time.isoformat() if quote.end_time else None,
-                   "tradable": quote.tradable, "stop_trigger": reason,
+                   "tradable": quote.tradable, "stop_trigger": reason, "execution_block": execution_block,
                    "depth": None if depth is None else {"ok": depth.ok, "size": depth.size, "detail": depth.detail}}
         with self.lock:
             self.conn.execute("INSERT INTO position_quotes(ts, position_id, payload) VALUES (?, ?, ?)",
