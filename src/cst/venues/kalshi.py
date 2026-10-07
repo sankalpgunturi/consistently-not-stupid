@@ -8,6 +8,7 @@ can name the event instead of the ticker.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 
 from cst.models import Quote
@@ -323,6 +324,15 @@ def _needs_trade(market: dict, hours: float) -> bool:
     return True
 
 
+def _inclusive_max_ts(ts: float) -> int:
+    """Whole-second max_ts that still includes a trade at ``ts``.
+
+    The trades endpoint takes unix seconds. Ceiling the boundary keeps that
+    print in the window. Stepping back a truncated second drops it.
+    """
+    return int(math.ceil(float(ts) - 1e-6))
+
+
 def _history_error(failures: int, unreadable: int) -> str | None:
     parts = []
     if failures:
@@ -340,21 +350,30 @@ def _read_trades(
     ticker: str,
     shallow_ts: float,
     deep_ts: float,
-    resume_ts: float | None,
+    resume: dict | None,
     budget: dict,
 ) -> dict | None:
     """Page trades until they reach ``deep_ts``, the list ends, or the budget does.
 
-    A returned dict is safe to store. ``None`` means this ticker must be tried
-    again: the call failed, or the payload had trades with no readable price.
+    A later scan continues with the cursor and the same max_ts. A numeric
+    cutoff a second earlier would drop the prints in between. A returned dict
+    is safe to store. ``None`` means this ticker must be tried again: the call
+    failed, or the payload had trades with no readable price.
     ``budget['stop']`` is set when the per-scan cap is used up.
     """
-    max_ts = int(resume_ts if resume_ts is not None else shallow_ts)
-    cursor = ""
+    resume = resume or {}
+    cursor = str(resume.get("cursor") or "")
+    if cursor and resume.get("max_ts") is not None:
+        max_ts = int(resume["max_ts"])
+    else:
+        cursor = ""
+        max_ts = _inclusive_max_ts(shallow_ts)
     collected: list[dict] = []
     oldest: float | None = None
     exhausted = False
     reached = False
+    next_cursor = cursor
+    next_max_ts = max_ts
     while True:
         if budget["lookups"] >= TRADE_LOOKUPS:
             budget["stop"] = True
@@ -375,6 +394,7 @@ def _read_trades(
             return None
         if not trades:
             exhausted = True
+            next_cursor = ""
             break
         readable = 0
         page_oldest: float | None = None
@@ -404,26 +424,41 @@ def _read_trades(
             oldest = page_oldest if oldest is None else min(oldest, page_oldest)
         if oldest is not None and oldest <= deep_ts + 1e-6:
             reached = True
+            next_cursor = ""
             break
         cursor = str(payload.get("cursor") or "") if isinstance(payload, dict) else ""
         if cursor:
+            next_cursor = cursor
+            next_max_ts = max_ts
             continue
         if len(trades) < TRADE_PAGE:
             exhausted = True
+            next_cursor = ""
             break
         if oldest is None:
             budget["unreadable"] += 1
             return None
-        max_ts = int(oldest) - 1
+        # No cursor. The next window still includes the oldest print we have.
+        stepped = _inclusive_max_ts(oldest)
+        if stepped >= max_ts:
+            next_cursor = ""
+            next_max_ts = max_ts
+            break
+        max_ts = stepped
+        next_cursor = ""
+        next_max_ts = stepped
     if not collected and not exhausted:
         return None
+    done = reached or exhausted
     covered_until = oldest if oldest is not None else shallow_ts
     return {
         "trades": collected,
         "shallow_ts": shallow_ts,
         "covered_until": covered_until,
         "exhausted": exhausted,
-        "reached": reached or exhausted,
+        "reached": done,
+        "resume_cursor": "" if done else next_cursor,
+        "resume_max_ts": None if done else next_max_ts,
     }
 
 
@@ -433,7 +468,7 @@ def fetch_settled_record(
     page_size: int,
     hours: float,
     skip: set[str] | None = None,
-    resume: dict[str, float] | None = None,
+    resume: dict[str, dict] | None = None,
     http: MarketHttp | None = None,
 ) -> tuple[dict[str, dict] | None, str | None]:
     """New per-ticker trade windows from settled markets.
@@ -507,6 +542,8 @@ def fetch_settled_record(
                         "exhausted": False,
                         "trades": window["trades"],
                         "reached": False,
+                        "resume_cursor": window.get("resume_cursor") or "",
+                        "resume_max_ts": window.get("resume_max_ts"),
                     }
                 continue
             yes_price = yes_price_before_close(

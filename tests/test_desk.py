@@ -938,6 +938,124 @@ def test_a_tighter_horizon_rescores_a_trade_only_when_it_reaches(tmp_path):
     assert "KX1" not in store.venue_checked(5)
 
 
+def test_a_resumed_trade_read_keeps_the_boundary_print(tmp_path, monkeypatch):
+    monkeypatch.setattr("cst.venues.kalshi.TRADE_LOOKUPS", 1)
+    close = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    deep = close - timedelta(hours=2)
+    boundary = deep + timedelta(seconds=0.4)
+    qualifying = deep - timedelta(seconds=0.2)
+    older = deep - timedelta(seconds=30)
+
+    def stamp(moment: datetime) -> str:
+        return moment.isoformat()
+
+    class _Http:
+        def __init__(self):
+            self.calls = []
+
+        def get_json(self, url, params=None):
+            params = params or {}
+            if url.endswith("/markets"):
+                return {"markets": [_settled_market("KXGAP", close_time=close.isoformat().replace("+00:00", "Z"))], "cursor": ""}
+            self.calls.append(dict(params))
+            max_ts = int(params["max_ts"])
+            if not params.get("cursor"):
+                return {
+                    "trades": [{"trade_id": "new", "yes_price_dollars": "0.2000", "created_time": stamp(boundary)}],
+                    "cursor": "next",
+                }
+            page = [
+                (qualifying, "0.5000", "mid"),
+                (older, "0.9400", "old"),
+            ]
+            kept = [
+                {"trade_id": trade_id, "yes_price_dollars": price, "created_time": stamp(moment)}
+                for moment, price, trade_id in page
+                if moment.timestamp() <= max_ts
+            ]
+            return {"trades": kept, "cursor": ""}
+
+        def close(self):
+            pass
+
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    first, err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 20, 2, http=_Http())
+    assert err is None
+    assert first["KXGAP"]["resume_cursor"] == "next"
+    store.add_venue_samples(first)
+    resume = store.venue_resume(2)["KXGAP"]
+    assert resume["cursor"] == "next"
+    assert resume["max_ts"] == int(store.conn.execute(
+        "SELECT resume_max_ts FROM venue_markets WHERE ticker = 'KXGAP'"
+    ).fetchone()[0])
+    second_http = _Http()
+    second, err = fetch_settled_record(
+        "https://kalshi.example/trade-api/v2", 1, 20, 2, resume={"KXGAP": resume}, http=second_http
+    )
+    assert err is None
+    assert second_http.calls[0]["cursor"] == "next"
+    assert int(second_http.calls[0]["max_ts"]) == resume["max_ts"]
+    store.add_venue_samples(second)
+    prices = [
+        row[0]
+        for row in store.conn.execute("SELECT yes_price FROM venue_trades WHERE ticker = 'KXGAP' ORDER BY traded_at")
+    ]
+    assert 0.5 in prices
+    assert price_bucket(0.94) not in store.calibration()
+
+
+def test_an_upgraded_sample_keeps_its_horizon_and_a_bare_aggregate_does_not(tmp_path):
+    bucket = price_bucket(0.94)
+    dated = tmp_path / "dated.sqlite"
+    first = Store(dated, StrategyParams(), 1000)
+    first.conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('venue_samples', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps({"KXOLD": {"price": 0.94, "won": True, "hours": 2, "bucket": bucket}}),),
+    )
+    first.conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('venue_record', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps({bucket: [100, 100]}),),
+    )
+    first.conn.execute("DELETE FROM meta WHERE key = 'legacy_history_migrated'")
+    first.conn.commit()
+    first.conn.close()
+    upgraded = Store(dated, StrategyParams(), 1000)
+    params = upgraded.params()
+    params.min_hours_to_expiry = 3
+    upgraded.save_params(params)
+    assert bucket not in upgraded.calibration()
+    params.min_hours_to_expiry = 2
+    upgraded.save_params(params)
+    assert upgraded.calibration()[bucket] == (1, 1)
+
+    engine_path = tmp_path / "engine"
+    seeded = Store(engine_path / "book.sqlite", StrategyParams(min_stable_scans=1, min_hours_to_expiry=3), 1000)
+    seeded.conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('venue_record', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps({bucket: [100, 100]}),),
+    )
+    seeded.conn.execute("DELETE FROM meta WHERE key = 'legacy_history_migrated'")
+    seeded.conn.execute("DELETE FROM meta WHERE key = 'venue_samples'")
+    seeded.conn.commit()
+    seeded.conn.close()
+    quote = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=20))
+    engine = Engine(
+        Settings(data_dir=str(engine_path), min_stable_scans=1, bankroll=1000),
+        fetcher=lambda _settings: ([quote], []),
+        history=lambda *_args: (None, "Kalshi settled record: down"),
+    )
+    engine.depth = _cover
+    engine.decider = lambda _proposals: {}
+    state = engine.run_cycle()
+    assert engine.store.params().min_hours_to_expiry == 3
+    assert engine.store.calibration() == {}
+    assert state["counts"]["bought"] == 0
+    assert state["book"]["cash"] == 1000
+
+
 def test_reset_keeps_the_venue_record(tmp_path):
     store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
     bucket = price_bucket(0.94)

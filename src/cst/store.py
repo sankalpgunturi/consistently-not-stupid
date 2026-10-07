@@ -12,7 +12,7 @@ from pathlib import Path
 
 from cst.models import BookView, Decision, Position, Settlement, StrategyParams, Trade, utcnow
 from cst.strategy import price_bucket
-from cst.venues.kalshi import _covers_cutoff, settled_favorite
+from cst.venues.kalshi import _covers_cutoff, _inclusive_max_ts, settled_favorite
 
 
 def _iso(dt: datetime | None = None) -> str:
@@ -87,7 +87,9 @@ class Store:
                 volume REAL NOT NULL,
                 covered_until REAL NOT NULL,
                 shallow_ts REAL NOT NULL,
-                exhausted INTEGER NOT NULL
+                exhausted INTEGER NOT NULL,
+                resume_cursor TEXT NOT NULL DEFAULT '',
+                resume_max_ts INTEGER
             );
             CREATE TABLE IF NOT EXISTS venue_trades (
                 ticker TEXT NOT NULL,
@@ -109,7 +111,13 @@ class Store:
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(settlements)")}
         if "market_id" not in columns:
             self.conn.execute("ALTER TABLE settlements ADD COLUMN market_id TEXT")
+        market_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(venue_markets)")}
+        if "resume_cursor" not in market_columns:
+            self.conn.execute("ALTER TABLE venue_markets ADD COLUMN resume_cursor TEXT NOT NULL DEFAULT ''")
+        if "resume_max_ts" not in market_columns:
+            self.conn.execute("ALTER TABLE venue_markets ADD COLUMN resume_max_ts INTEGER")
         self._reconcile_foreign_positions()
+        self._migrate_legacy_history()
         self.conn.commit()
 
     def _reconcile_foreign_positions(self) -> None:
@@ -161,6 +169,28 @@ class Store:
                 row["market_id"],
                 "This venue was removed. The open clip was closed at cost and the cash was returned.",
             )
+
+    def _migrate_legacy_history(self) -> None:
+        """Move the old JSON sample onto rows that remember their horizon.
+
+        The previous aggregate is a bucket total with no horizon. Using it
+        after a tighter nearest-expiry would admit a two-hour observation at
+        three hours. Samples that name their horizon are kept at that horizon.
+        An aggregate that does not is dropped.
+        """
+        if self._get("legacy_history_migrated"):
+            return
+        raw = self._get("venue_samples")
+        migrated = False
+        if isinstance(raw, dict):
+            for ticker, row in raw.items():
+                if isinstance(row, dict) and "hours" in row:
+                    self._merge_sample(str(ticker), row)
+                    migrated = True
+            self._put("venue_samples", {})
+        if migrated or not self._has_samples():
+            self._put("venue_record", {})
+        self._put("legacy_history_migrated", True)
 
     def _seed(self, params: StrategyParams) -> None:
         with self.lock:
@@ -488,17 +518,26 @@ class Store:
             ).fetchall()
         return {str(row["ticker"]) for row in rows}
 
-    def venue_resume(self, hours: float) -> dict[str, float]:
-        """Where to continue a trade read that has not reached this horizon."""
+    def venue_resume(self, hours: float) -> dict[str, dict]:
+        """How to continue a trade read that has not reached this horizon.
+
+        The cursor is the next page of the same query. Without one, the next
+        read starts again at the shallow rail so the boundary second is not skipped.
+        """
         cutoff_delta = _hours_key(hours) * 3600
-        found: dict[str, float] = {}
+        found: dict[str, dict] = {}
         with self.lock:
             rows = self.conn.execute("SELECT * FROM venue_markets").fetchall()
         for row in rows:
             cutoff = float(row["close_ts"]) - cutoff_delta
             if _covers_cutoff(float(row["shallow_ts"]), float(row["covered_until"]), bool(row["exhausted"]), cutoff):
                 continue
-            found[str(row["ticker"])] = float(row["covered_until"]) - 1
+            cursor = str(row["resume_cursor"] or "")
+            max_ts = row["resume_max_ts"]
+            if cursor and max_ts is not None:
+                found[str(row["ticker"])] = {"cursor": cursor, "max_ts": int(max_ts)}
+            else:
+                found[str(row["ticker"])] = {"cursor": "", "max_ts": _inclusive_max_ts(float(row["shallow_ts"]))}
         return found
 
     def add_venue_samples(self, incoming: dict) -> None:
@@ -527,6 +566,8 @@ class Store:
         if price is None:
             won = 0
             bucket = ""
+        elif not bucket:
+            bucket = price_bucket(float(price))
         self.conn.execute(
             """
             INSERT INTO venue_samples (ticker, hours, price, won, bucket)
@@ -546,17 +587,31 @@ class Store:
             shallow = max(shallow, float(existing["shallow_ts"]))
             covered = min(covered, float(existing["covered_until"]))
             exhausted = 1 if exhausted or existing["exhausted"] else 0
+        reached = bool(row.get("reached")) or bool(exhausted)
+        if reached:
+            resume_cursor = ""
+            resume_max_ts = None
+        else:
+            resume_cursor = str(row.get("resume_cursor") or "")
+            resume_max_ts = row.get("resume_max_ts")
+            if resume_max_ts is not None:
+                resume_max_ts = int(resume_max_ts)
         self.conn.execute(
             """
-            INSERT INTO venue_markets (ticker, result, close_ts, volume, covered_until, shallow_ts, exhausted)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO venue_markets (
+                ticker, result, close_ts, volume, covered_until, shallow_ts, exhausted,
+                resume_cursor, resume_max_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ticker) DO UPDATE SET
                 result = excluded.result,
                 close_ts = excluded.close_ts,
                 volume = excluded.volume,
                 covered_until = excluded.covered_until,
                 shallow_ts = excluded.shallow_ts,
-                exhausted = excluded.exhausted
+                exhausted = excluded.exhausted,
+                resume_cursor = excluded.resume_cursor,
+                resume_max_ts = excluded.resume_max_ts
             """,
             (
                 ticker,
@@ -566,6 +621,8 @@ class Store:
                 covered,
                 shallow,
                 exhausted,
+                resume_cursor,
+                resume_max_ts,
             ),
         )
         for trade in trades:
@@ -670,7 +727,8 @@ class Store:
 
         A ticker we settled is left out of the venue counts and added from our
         settlement. A print counts only when its timestamp clears the horizon.
-        An injected bucket record is the fallback when no samples are stored.
+        An injected bucket record is the fallback when this book has no sample
+        rows. An upgraded aggregate with no horizon is not that fallback.
         """
         with self.lock:
             hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)

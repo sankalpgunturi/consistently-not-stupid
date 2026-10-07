@@ -30,7 +30,7 @@ def default_history(
     settings: Settings,
     skip: set[str],
     hours: float,
-    resume: dict[str, float] | None = None,
+    resume: dict[str, dict] | None = None,
 ) -> tuple[dict[str, dict] | None, str | None]:
     return fetch_settled_record(
         settings.kalshi_base_url,
