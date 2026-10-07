@@ -85,3 +85,31 @@ def test_watch_only_consumes_each_poll_once_and_rejects_old_data():
     watch.generation = 2
     watch.polled_at -= 3
     assert watch(Settings())[0] == []
+
+
+def test_running_watch_adopts_expanded_and_tightened_outcome_windows():
+    discovered, polled = [], []
+    def discover(settings):
+        discovered.append(settings.entry_window_minutes)
+        return [], []
+    watch = MarketWatch(discover, interval=.1)
+    def poll(settings):
+        polled.append(settings.entry_window_minutes)
+        return [], []
+    watch._poll = poll
+    try:
+        for minutes in (5, 60, 1):
+            watch(Settings(entry_window_minutes=minutes))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                with watch.lock:
+                    if discovered[-1:] == [minutes] and polled[-1:] == [minutes]:
+                        break
+                    watch.lock.wait(timeout=.1)
+            assert discovered[-1] == minutes
+            assert polled[-1] == minutes
+        assert watch.thread.is_alive() and watch.poll_thread.is_alive()
+    finally:
+        watch.close()
+        watch.thread.join(timeout=2)
+        watch.poll_thread.join(timeout=2)

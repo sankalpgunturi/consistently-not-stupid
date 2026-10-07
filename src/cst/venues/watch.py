@@ -24,6 +24,7 @@ class MarketWatch:
         self.errors = ["Market discovery is warming up."]
         self.discovered_at = 0.0
         self.client = MarketHttp(timeout=5)
+        self.settings = None
 
     def close(self):
         self.stop_event.set()
@@ -31,6 +32,8 @@ class MarketWatch:
 
     def _discover(self, settings):
         while not self.stop_event.is_set():
+            with self.lock:
+                settings = self.settings or settings
             started = time.monotonic()
             try:
                 quotes, errors = self.discover(settings)
@@ -43,6 +46,8 @@ class MarketWatch:
             self.stop_event.wait(max(0.1, self.interval - (time.monotonic() - started)))
 
     def __call__(self, settings):
+        with self.lock:
+            self.settings = settings
         if self.thread is None:
             self.thread = threading.Thread(target=self._discover, args=(settings,),
                                            name="cst-discovery", daemon=True)
@@ -62,6 +67,8 @@ class MarketWatch:
     def _monitor(self, settings):
         try:
             while not self.stop_event.is_set():
+                with self.lock:
+                    settings = self.settings or settings
                 started = time.monotonic()
                 try:
                     result = self._poll(settings)
