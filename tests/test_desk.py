@@ -1339,3 +1339,14 @@ def test_realized_curve_counts_completed_trades_and_fees_once(tmp_path):
     assert points[1]['cumulative_pnl'] == pytest.approx(-0.085)
     assert points[1]['pnl'] == pytest.approx(0.06)
     assert points[1]['side'] == 'no'
+
+
+def test_direction_templates_compare_assets_not_boilerplate():
+    def score(a, b, event_b='b'):
+        return related(a, 'Target price: $95000', 'a', 'kalshi',
+                       b, 'Target price: $1.28', event_b, 'kalshi')
+    assert score('BTC price up in next 15 mins?', 'GBP/USD price up in next 15 mins?') == 0
+    assert score('BTC price up in next 15 mins?', 'Platinum price up in next 15 mins?') == 0
+    assert score('BTC price up in next 15 mins?', 'Bitcoin price down in next 15 minutes?') == 1
+    # Same-event identity wins even when the displayed asset names differ.
+    assert score('BTC price up in next 15 mins?', 'GBP/USD price up in next 15 mins?', 'a') == 1

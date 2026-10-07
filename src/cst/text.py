@@ -133,6 +133,13 @@ def related(title_a: str, outcome_a: str, event_a: str, venue_a: str, title_b: s
     """Looser overlap used to keep the book from holding the same risk twice."""
     if venue_a == venue_b and event_a and event_a == event_b:
         return 1.0
+    # These venue templates differ primarily in the named asset. Shared words
+    # like "up in next 15 mins" and "Target Price" are not evidence of a twin.
+    template = r"^(.+?)\s+price\s+(?:up|down)\s+in\s+(?:the\s+)?next\s+\d+\s+(?:mins?|minutes?)\??$"
+    asset_a = re.fullmatch(template, title_a.strip(), flags=re.IGNORECASE)
+    asset_b = re.fullmatch(template, title_b.strip(), flags=re.IGNORECASE)
+    if asset_a and asset_b:
+        return float(_canonicalize(asset_a[1]) == _canonicalize(asset_b[1]))
     words_a = tokens(proposition(title_a, outcome_a), drop_numbers=True)
     words_b = tokens(proposition(title_b, outcome_b), drop_numbers=True)
     return _jaccard(words_a, words_b)
