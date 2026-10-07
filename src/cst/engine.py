@@ -143,6 +143,11 @@ class Engine:
                         key=proposal.key,
                     ))
                     continue
+                # Pause and block can arrive while the model or the book read is in flight.
+                refusal = self._operator_refuses(proposal)
+                if refusal is not None:
+                    decisions.append(refusal)
+                    continue
                 trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
                 if trade is None:
                     decisions.append(Decision(
@@ -222,8 +227,6 @@ class Engine:
                     continue
                 if quote.bid > 0:
                     self.broker.mark(position, quote.bid)
-                if position.opened_cycle == self.store.cycle():
-                    continue
                 if quote.bid > 0 and quote.bid <= position.entry_price - params.stop_gap:
                     depth = self.check_depth(quote, position.shares, "sell")
                     if not depth.ok:
@@ -265,6 +268,28 @@ class Engine:
             if quote.side == side:
                 return quote
         return quotes[0] if quotes else None
+
+    def _operator_refuses(self, proposal) -> Decision | None:
+        quote = proposal.quote
+        if self.store.operator_pause():
+            detail = "New buys are paused by the operator. Exits still run."
+            code = "drawdown"
+        elif quote.key in self.store.blocked():
+            detail = "The operator blocked this contract."
+            code = "block"
+        else:
+            return None
+        return Decision(
+            action="skipped",
+            reason_code=code,
+            title=quote.title,
+            venue=quote.venue,
+            outcome=quote.outcome,
+            detail=detail,
+            price=quote.ask,
+            edge=proposal.edge,
+            key=quote.key,
+        )
 
     def check_depth(self, quote: Quote, shares: float, action: str):
         if self.depth is not None:

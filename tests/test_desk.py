@@ -2,6 +2,9 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from cst.api import create_app
@@ -326,6 +329,61 @@ def test_engine_paper_cycle_buys_the_cheap_favorite(tmp_path):
     assert state["mode"] == "paper"
 
 
+def test_a_pause_during_the_scan_blocks_the_fill(tmp_path):
+    cheap, rich = _cross_pair()
+    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine.refresher = lambda *_args: None
+    engine.decider = lambda _proposals: {}
+    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+
+    def depth_then_pause(_quote, shares, _action):
+        engine.store.set_pause(True)
+        return DepthResult(True, shares, "The displayed size covers the clip.")
+
+    engine.depth = depth_then_pause
+    state = engine.run_cycle()
+    assert state["operator_pause"] is True
+    assert state["counts"]["bought"] == 0
+    assert state["positions"] == []
+    assert state["book"]["cash"] == 1000
+
+
+def test_a_block_during_the_scan_blocks_the_fill(tmp_path):
+    cheap, rich = _cross_pair()
+    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine.refresher = lambda *_args: None
+    engine.decider = lambda _proposals: {}
+    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+
+    def depth_then_block(quote, shares, _action):
+        engine.store.block(quote.key, "Blocked while the book was being read.")
+        return DepthResult(True, shares, "The displayed size covers the clip.")
+
+    engine.depth = depth_then_block
+    state = engine.run_cycle()
+    assert state["counts"]["bought"] == 0
+    assert state["positions"] == []
+    assert any(row["reason_code"] == "block" for row in state["tape"])
+
+
+def test_a_stop_can_fire_before_the_next_scan(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    quote = make_quote()
+    PaperBroker(engine.store).buy(quote, quote.min_shares, "cross_venue", "test", engine.store.cycle())
+    assert engine.store.positions()[0].opened_cycle == engine.store.cycle()
+    engine.depth = _cover
+    engine.refresher = lambda *_args: make_quote(bid=0.90, ask=0.91)
+    engine.mark_open()
+    assert engine.store.positions()
+    engine.refresher = lambda *_args: make_quote(bid=0.80, ask=0.81)
+    engine.mark_open()
+    assert engine.store.positions() == []
+    assert engine.store.trades()[0].action == "sell"
+
+
 def test_drawdown_pauses_new_buys(tmp_path):
     cheap = make_quote()
     rich = make_quote(
@@ -385,8 +443,21 @@ def test_websocket_sends_the_paper_snapshot(tmp_path):
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as socket:
             payload = socket.receive_json()
+        with client.websocket_connect("/ws", headers={"origin": "http://localhost:8000"}) as socket:
+            local = socket.receive_json()
     assert payload["mode"] == "paper"
     assert payload["live"] == "unavailable"
+    assert local["csrf"]
+
+
+def test_a_foreign_websocket_origin_is_refused(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    app = create_app(engine, start_loop=False)
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"origin": "https://attacker.example"}) as socket:
+                socket.receive_json()
 
 
 def test_source_never_places_an_order():

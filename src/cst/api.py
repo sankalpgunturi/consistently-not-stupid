@@ -1,8 +1,8 @@
 """Dashboard and the small JSON API the page polls.
 
 Mutating routes require the token from GET /api/state. A browser on another
-origin is rejected. The server still binds to localhost. There is no login
-and no route that sends an order.
+origin is rejected, including the snapshot socket. The server still binds to
+localhost. There is no login and no route that sends an order.
 """
 
 from __future__ import annotations
@@ -126,6 +126,10 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
+        origin = socket.headers.get("origin")
+        if origin and urlparse(origin).hostname not in _LOCAL:
+            await socket.close(code=1008)
+            return
         await socket.accept()
         try:
             while True:

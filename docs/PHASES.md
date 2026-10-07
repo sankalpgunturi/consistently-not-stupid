@@ -80,4 +80,6 @@ Blind spots that were real, and what was done:
 - Block on a grouped row over-claimed. The button is only on a single contract now.
 - Raising the twin bar was classified as tightening. Review caught it. The direction is corrected and tested.
 
+A later pass closed three timing holes. A pause or a block that arrives while the scan is still reading the book is checked again immediately before each fill. A stop can fire on a mark in the same cycle the clip was opened. `/ws` closes a foreign `Origin` before it accepts, so the snapshot and the token stay on localhost.
+
 Left open, on purpose, and written in `docs/GAPS.md`: human pair approval, no live wire, the 0.6 drop threshold, tighten-only with a 90% floor, no login, the standard Kalshi fee, a scan that is not the whole venue, stops that can book a small loss, and Polymarket settlement that waits for UMA. None of those are patched by pretending the book has an edge.
