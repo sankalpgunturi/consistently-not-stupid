@@ -115,7 +115,7 @@ function render(next) {
     [counts.favorites, "favorites"],
     [counts.fee_ok, "after fees"],
     [counts.stable, "stable"],
-    [counts.confirmed, "evidence passed"],
+    [counts.confirmed, "entry checks passed"],
     [counts.bought, "filled"],
   ];
   $("funnel").innerHTML = steps.map(([value, label]) =>

@@ -8,7 +8,7 @@ After each `scan_interval_seconds` delay (default 60 seconds), `Engine.run_cycle
 
 1. Read Kalshi public markets (first pages, multivariate combos excluded).
 2. Remember which quotes stayed inside the probability band. A favorite has to be stable for `min_stable_scans`.
-3. Record the first structurally eligible quote per event and resolve pending research observations. `strategy.evaluate` builds proposals only when fee, expected-outcome timing, size, correlation and evidence checks pass. The confirming probability is the Wilson lower bound from resolved prospective observations in the active entry window and price bucket. It must exceed ask plus fee by `min_edge`, with at least `min_sample` observations. Research records are not fills, and legacy two-hour history is kept separate. A high quote with insufficient evidence stays in cash. Before each fill, re-read the knobs and book and run admission again.
+3. Record eligible research observations and resolve pending outcomes. `strategy.evaluate` proposes stable quoted favorites that pass probability, fee, expected-outcome timing, size and correlation checks. The ten-minute paper experiment does not require historical evidence or a confidence bound. Research outcomes remain available for daily review. Legacy replay retains its evidence gate. Before each fill, re-read the knobs and book and run admission again.
 4. If `CST_OPENAI_API_KEY` is set, one `POST /v1/decisions` call (`gpt-6-luna`) may drop a proposed clip. The chat note may also name drops. Unknown ids are ignored.
 5. Before a paper buy, `depth.py` reads the Kalshi orderbook. The other side's bids are the ask. Short size, a moved touch, or a failed read skips the fill.
 6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. The mark loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and stops a clip whose bid fell `stop_gap` under the entry, if that bid has size.
@@ -31,7 +31,7 @@ After each `scan_interval_seconds` delay (default 60 seconds), `Engine.run_cycle
 | What does the page call? | `src/cst/api.py`, `src/cst/dashboard/` |
 | What are the rails and the seed? | `src/cst/models.py` (`RAILS`, `STEPS`), `src/cst/config.py` |
 
-`Quote`, `Proposal`, `Decision`, `Position`, and `BookView` are the records that cross those files. The strategy confirms a buy from the settled record, not from a second venue.
+`Quote`, `Proposal`, `Decision`, `Position`, and `BookView` are the records that cross those files. The paper strategy uses quoted favorites; research results do not gate admission.
 
 ## Human overrides
 
@@ -49,7 +49,7 @@ New books use `entry_window_minutes=10` and a 60-second delay between scans. A q
 
 Each cycle reads quotes, records eligible research observations, resolves pending observations, evaluates the deterministic rule, and asks the models to veto proposals. Quotes and timing are checked again after model review. Calls remain sequential so no overlapping scans can duplicate a buy; actual cadence includes scan and review duration. Positions are marked between scans.
 
-`near_observations` preserves the first structurally eligible quote per event, its expected outcome time, price, fee, and eventual result. These are research observations, not fills or ledger profits. Event deduplication reduces repetition but does not establish independence across events. Calibration counts only resolved observations from the active entry window. The former two-hour samples remain in their original tables for replay and are not used to admit these bets. Until enough appropriate evidence exists, the desk stays in cash.
+`near_observations` preserves the first structurally eligible quote per event, its expected outcome time, price, fee, and eventual result. These are research observations, not fills or ledger profits. Event deduplication reduces repetition but does not establish independence across events. Calibration counts only resolved observations from the active entry window. The former two-hour samples remain in their original tables for replay and are not used to admit these bets. Historical evidence does not gate the ten-minute paper experiment; the user explicitly removed that requirement.
 
 The experimental target is nonnegative net portfolio performance per 24 hours, anchored to initial funding. Individual trades may lose. Daily equity change includes fees and unrealized changes; fees are reported separately but never subtracted twice. A negative day triggers review rather than an automatic parameter change. The original $1,000 is the only contribution; proceeds stay available for reinvestment. Neither high prices nor a short horizon guarantees a result. Venue timing estimates may change, and payment may follow the expected outcome.
 

@@ -247,6 +247,7 @@ class Engine:
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
+                "admission_policy": "For the ten-minute paper experiment, historical sample size, win rate and confidence bounds are research only, never an entry requirement. Do not reinstate this gate through vetoes or parameter changes." if params.entry_window_minutes > 0 else "Legacy evidence gate applies.",
                 "calibration_source": "Prospective first eligible quote per event in the entry window; independent from old two-hour history. Different events may still correlate." if params.entry_window_minutes > 0 else "Legacy pre-close trade history",
                 "venue_errors": errors,
                 "refusals": refusal_counts(result.decisions),
@@ -255,7 +256,7 @@ class Engine:
                     "favorites": "Quotes meeting bid, ask, and spread rules.",
                     "fee_ok": "Favorites passing fee, size, liquidity, and horizon checks.",
                     "stable": "fee_ok quotes observed for the required consecutive scans.",
-                    "confirmed": "Stable quotes whose historical sample and lower confidence bound pass.",
+                    "confirmed": "Stable quotes admitted without a historical-evidence gate." if params.entry_window_minutes > 0 else "Stable quotes whose historical sample and lower confidence bound pass.",
                     "kept": "Confirmed quotes selected by portfolio and correlation limits before model vetoes.",
                     "edge": "Historical lower confidence bound minus ask and fee; null if not evaluated or sample too small.",
                 },
@@ -654,7 +655,7 @@ class Engine:
         unrealized = sum(item.mark_value - item.cost_basis for item in positions)
         param_rows = []
         for key, (label, help_text) in PARAM_COPY.items():
-            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry"}:
+            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge"}:
                 continue
             lo, hi = RAILS[key]
             param_rows.append({

@@ -4,8 +4,9 @@ The economic law, which the retrospective is not allowed to turn off:
 
 * Pay the ask only when both sides of the book are already at the probability bar.
 * If the contract wins, the payout has to clear the venue fee by ``min_win_profit``.
-* A market quote alone is not an edge. Buying it, when the quote is right,
-  loses the fee. A buy needs a settled record sitting above the all-in cost.
+* The ten-minute paper experiment uses quoted probability, not a historical
+  evidence gate. Research outcomes remain available for retrospective analysis.
+* Legacy replay retains its historical-evidence rule.
 * One clip is the venue minimum. A second copy of the same risk is refused.
 """
 
@@ -132,6 +133,13 @@ def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[st
 
 
 def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Proposal | None:
+    if params.entry_window_minutes > 0:
+        _ok, _fee, _profit, detail = _fee_ok(quote, params)
+        return Proposal(
+            quote=quote, shares=quote.min_shares, edge=0.0,
+            signal="paper_favorite", detail=detail,
+            confirm="Quoted favorite; historical evidence is not required",
+        )
     wins, n = book.calibration.get(price_bucket(quote.ask), (0, 0))
     if n < params.min_sample:
         return None
@@ -159,7 +167,7 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
 
     The scan reads the knobs once. Before the fill, every admission rule runs
     again on the current knobs and the current book, including the horizon,
-    the fee, the streak, the caps, and the settled record.
+    the fee, the streak and the caps (plus evidence in legacy replay).
     """
     now = now or datetime.now(timezone.utc)
     if not quote_in_band(quote, params):

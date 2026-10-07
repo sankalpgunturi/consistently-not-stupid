@@ -74,7 +74,7 @@ def heuristic_updates(
 def heuristic_summary(counts: dict[str, int], bought: int) -> str:
     if bought:
         noun = "clip" if bought == 1 else "clips"
-        return f"Bought {bought} minimum {noun} that cleared the fee and the settled record."
+        return f"Bought {bought} minimum {noun} that cleared the entry and execution checks."
     favorites = counts.get("favorites", 0)
     if favorites == 0:
         return "No live quote had both sides of the book at the probability bar."
@@ -235,7 +235,7 @@ class Reviewer:
                 "inactive_legacy_knobs": ["min_hours_to_expiry", "max_days_to_expiry"] if params.entry_window_minutes > 0 else [],
             },
             "knobs": {key: {"value": getattr(params, key), "rail": RAILS[key]} for key in RAILS
-                      if not (params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry"})},
+                      if not (params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge"})},
             "counts": counts,
             "proposals": [
                 {

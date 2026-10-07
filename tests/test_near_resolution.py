@@ -151,3 +151,17 @@ def test_market_status_survives_parser_and_blocks_paused_fills(tmp_path,status,t
     engine.depth=lambda _q,n,_action:DepthResult(True,n,'size present')
     assert engine.check_depth(quote,1,'buy').ok is tradable
     assert engine.check_depth(quote,1,'sell').ok is tradable
+
+
+@pytest.mark.parametrize("record", [{}, {"0.93–0.96": (0, 100)}, {"0.93–0.96": (1, 1)}])
+def test_paper_entries_and_fill_recheck_do_not_require_history(record):
+    q = make_quote(end_time=NOW+timedelta(minutes=5), expected_resolution_time=NOW+timedelta(minutes=5))
+    p = make_params(entry_window_minutes=10)
+    b = make_book(streaks={q.key:2}, calibration=record)
+    result = evaluate([q], p, b, now=NOW)
+    assert len(result.proposals) == 1
+    assert result.proposals[0].signal == "paper_favorite"
+    assert result.proposals[0].edge == 0  # No claimed statistical edge.
+    assert tightened_out(q, p, b, now=NOW) is None
+    b.operator_pause = True
+    assert tightened_out(q, p, b, now=NOW) is not None
