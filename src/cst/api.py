@@ -1,13 +1,14 @@
 """Dashboard and the small JSON API the page polls.
 
-Mutating routes require the token from GET /api/state. A browser on another
-origin is rejected, including the snapshot socket. The server still binds to
-localhost. There is no login and no route that sends an order.
+Mutating routes require the token from GET /api/state. When a browser sends
+Origin, it has to be this host or localhost. The snapshot socket uses the
+same rule. There is no login and no route that sends an order.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,8 +20,9 @@ from pydantic import BaseModel
 
 from cst.engine import Engine
 
-DASHBOARD = Path(__file__).resolve().parents[2] / "dashboard"
-_LOCAL = {"127.0.0.1", "localhost"}
+# Shipped inside the package so `pip install` can serve the page.
+DASHBOARD = Path(__file__).resolve().parent / "dashboard"
+_LOCAL = {"127.0.0.1", "localhost", "::1"}
 
 
 class PauseIn(BaseModel):
@@ -44,6 +46,30 @@ class KnobIn(BaseModel):
     key: str
 
 
+def _hostname(value: str | None) -> str:
+    if not value:
+        return ""
+    text = value.strip().lower()
+    if text.startswith("["):
+        end = text.find("]")
+        return text[1:end] if end > 1 else ""
+    return text.split(":")[0]
+
+
+def origin_allowed(origin: str | None, host_header: str | None) -> bool:
+    """Allow a missing Origin, localhost, or the host the browser actually called.
+
+    `--host` can be any interface. A page opened at that address sends Origin
+    and Host for the same name. A foreign site's Origin does not match Host.
+    """
+    if not origin:
+        return True
+    origin_host = (urlparse(origin).hostname or "").lower()
+    if origin_host in _LOCAL:
+        return True
+    return bool(origin_host) and origin_host == _hostname(host_header)
+
+
 def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -63,16 +89,16 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
             token = request.headers.get("x-csrf-token")
             if not token or token != engine.store.csrf():
                 return JSONResponse({"error": "Missing or bad CSRF token."}, status_code=403)
-            origin = request.headers.get("origin")
-            if origin:
-                host = urlparse(origin).hostname
-                if host not in _LOCAL:
-                    return JSONResponse({"error": "Foreign origin."}, status_code=403)
+            if not origin_allowed(request.headers.get("origin"), request.headers.get("host")):
+                return JSONResponse({"error": "Foreign origin."}, status_code=403)
         return await call_next(request)
 
     @app.get("/")
     def index():
-        return FileResponse(DASHBOARD / "index.html")
+        page = DASHBOARD / "index.html"
+        if not page.is_file():
+            return JSONResponse({"error": "Dashboard files are not installed."}, status_code=500)
+        return FileResponse(page)
 
     @app.get("/api/health")
     def health():
@@ -126,14 +152,20 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
-        origin = socket.headers.get("origin")
-        if origin and urlparse(origin).hostname not in _LOCAL:
+        if not origin_allowed(socket.headers.get("origin"), socket.headers.get("host")):
             await socket.close(code=1008)
             return
         await socket.accept()
+        last = None
         try:
             while True:
-                await socket.send_json(engine.snapshot())
+                payload = await asyncio.to_thread(engine.snapshot)
+                body = dict(payload)
+                body.pop("server_time", None)
+                encoded = json.dumps(body, sort_keys=True, default=str)
+                if encoded != last:
+                    await socket.send_text(json.dumps(payload, default=str))
+                    last = encoded
                 await asyncio.sleep(1)
         except WebSocketDisconnect:
             return

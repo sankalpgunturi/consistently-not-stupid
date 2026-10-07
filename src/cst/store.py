@@ -132,6 +132,21 @@ class Store:
             self._put("params", params.to_json())
             self.conn.commit()
 
+    def revise_params(self, revise):
+        """Read, revise, and write params under one lock.
+
+        revise(current) returns (updated, notes, applied) and must not touch
+        the store. An empty applied map does not write, so a scan that has
+        nothing to tighten cannot put an older copy back over an operator click.
+        """
+        with self.lock:
+            current = StrategyParams.from_json(self._get("params") or {})
+            updated, notes, applied = revise(current)
+            if applied:
+                self._put("params", updated.to_json())
+                self.conn.commit()
+            return updated, notes, applied
+
     def cash(self) -> float:
         with self.lock:
             return float(self._get("cash", self.bankroll))

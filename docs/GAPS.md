@@ -6,7 +6,7 @@ Choices filled in so the desk could run. Argue with these after the flight. None
 - **Live sending does not exist.** There is no arm button and no order POST. Adding signed orders, acknowledgements, reconciliation, and a kill path is a later reviewed change. Thirty days of paper is an observation window, not evidence the book won.
 - **The Decisions drop threshold is 0.6.** A clip is removed only when the matching answer is `drop` and the probability on `drop` is at least 0.6. Below that, or on any bad body, the deterministic set stands. The model cannot add a market.
 - **Overrides only tighten, and the floor is 90%.** One step per click, inside the rails. `min_probability` cannot fall below 0.90. The scan clock is not a risk knob.
-- **No login.** The desk binds to localhost and requires a CSRF token plus a local `Origin` when one is sent. That is not an account system.
+- **No login.** The desk requires a CSRF token. When a browser sends `Origin`, it has to be localhost or the same host the request is addressed to, so `--host` can be an interface other than localhost. That is not an account system.
 - **Kalshi fees use the standard 0.07 schedule, rounded up to the next cent.** Some series use another multiplier. It is not in the public market payload, so those fills may overstate or understate the cut.
 - **The scan is not the whole venue.** Polymarket is the most active events, a few pages. Kalshi is the first pages of open markets, and event titles are fetched only for high bids, capped. The funnel says so.
 - **A stop can book a small loss.** If the bid falls 8¢ under the entry and the bid has size, the paper clip sells. Marks themselves use the bid minus the exit fee, so a new buy usually shows a dip equal to the spread and the fee.

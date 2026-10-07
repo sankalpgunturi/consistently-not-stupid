@@ -28,7 +28,7 @@ Every `scan_interval_seconds` (default 10 minutes) `Engine.run_cycle`:
 | May the model remove it? | `src/cst/decisions.py`, `src/cst/review.py` |
 | Did cash move? | `src/cst/broker.py` |
 | Where is the book, the token, the audit? | `src/cst/store.py` |
-| What does the page call? | `src/cst/api.py`, `dashboard/` |
+| What does the page call? | `src/cst/api.py`, `src/cst/dashboard/` |
 | What are the rails and the seed? | `src/cst/models.py` (`RAILS`, `STEPS`), `src/cst/config.py` |
 
 `Quote`, `Proposal`, `Decision`, `Position`, and `BookView` are the records that cross those files. A proposal's `pair_id` is the sorted pair of quote keys. The dashboard approves that id; the strategy reads it back from the book.

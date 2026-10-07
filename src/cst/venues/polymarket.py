@@ -63,7 +63,24 @@ def _num(value) -> float | None:
         return None
 
 
-def quotes_from_polymarket_market(market: dict, event: dict | None = None) -> list[Quote]:
+def _book_ok(bid: float, ask: float, keep_extremes: bool) -> bool:
+    """Admission rejects a book pinned at 0 or 1. A mark of an open clip must keep it.
+
+    0/0 and 0/1 are an empty print, not a price. A 0.99/1.00 favorite, or a
+    collapsed 0.00/0.02 book, is a real touch.
+    """
+    if bid < 0 or ask < 0 or ask > 1 or ask < bid:
+        return False
+    if bid == 0 and ask == 0:
+        return False
+    if bid == 0 and ask >= 1:
+        return False
+    if keep_extremes:
+        return True
+    return bid > 0 and 0 < ask < 1
+
+
+def quotes_from_polymarket_market(market: dict, event: dict | None = None, keep_extremes: bool = False) -> list[Quote]:
     event = event or {}
     if market.get("archived"):
         return []
@@ -117,7 +134,7 @@ def quotes_from_polymarket_market(market: dict, event: dict | None = None) -> li
             continue
         if not live and not (closed and winner):
             continue
-        if live and (bid <= 0 or ask <= 0 or ask >= 1 or ask < bid):
+        if live and not _book_ok(bid, ask, keep_extremes):
             continue
         quotes.append(Quote(
             venue="polymarket",
@@ -224,7 +241,7 @@ def fetch_polymarket_market(base_url: str, market_id: str, http: MarketHttp | No
             return []
         events = market.get("events") or []
         event = events[0] if events else {}
-        return quotes_from_polymarket_market(market, event)
+        return quotes_from_polymarket_market(market, event, keep_extremes=True)
     except Exception as exc:
         log.warning("polymarket market %s failed: %s", market_id, exc)
         return []

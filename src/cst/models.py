@@ -267,8 +267,11 @@ class Position:
     def mark_value(self) -> float:
         from cst.fees import fee_for
 
-        if self.bid <= 0:
+        # A missing book leaves the last bid in place. A quoted zero is worthless.
+        if self.bid < 0:
             return self.cost_basis
+        if self.bid == 0:
+            return 0.0
         exit_fee = float(fee_for(self.fee_model, self.shares, self.bid, self.fee_rate, self.fee_exponent))
         return max(0.0, self.shares * self.bid - exit_fee)
 

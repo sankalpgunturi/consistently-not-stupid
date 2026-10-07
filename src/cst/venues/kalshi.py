@@ -63,7 +63,20 @@ def _category(ticker: str, fallback: str = "Other") -> str:
     return fallback
 
 
-def quotes_from_kalshi_market(market: dict, event: dict | None = None) -> list[Quote]:
+def _book_ok(bid: float, ask: float, keep_extremes: bool) -> bool:
+    """Same rule as the Polymarket parser: scans stay inside (0, 1), marks may pin."""
+    if bid < 0 or ask < 0 or ask > 1 or ask < bid:
+        return False
+    if bid == 0 and ask == 0:
+        return False
+    if bid == 0 and ask >= 1:
+        return False
+    if keep_extremes:
+        return True
+    return bid > 0 and 0 < ask < 1
+
+
+def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extremes: bool = False) -> list[Quote]:
     if market.get("mve_collection_ticker") or market.get("mve_selected_legs"):
         return []
     event = event or {}
@@ -95,7 +108,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None) -> list[Q
         size = _num(raw_size) if raw_size not in (None, "") else -1.0
         raw_bid_size = market.get(bid_size_key)
         bid_size = _num(raw_bid_size) if raw_bid_size not in (None, "") else -1.0
-        if not settled and (bid <= 0 or ask <= 0 or ask >= 1 or ask < bid):
+        if not settled and not _book_ok(bid, ask, keep_extremes):
             continue
         if settled and bid <= 0 and ask <= 0:
             bid, ask = (1.0, 1.0) if winner == side else (0.0, 0.0)
@@ -193,7 +206,7 @@ def fetch_kalshi_ticker(base_url: str, ticker: str, http: MarketHttp | None = No
         market = payload.get("market") if isinstance(payload, dict) else None
         if not isinstance(market, dict):
             return []
-        return quotes_from_kalshi_market(market)
+        return quotes_from_kalshi_market(market, keep_extremes=True)
     except Exception as exc:
         log.warning("kalshi market %s failed: %s", ticker, exc)
         return []

@@ -7,12 +7,12 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from cst.api import create_app
+from cst.api import DASHBOARD, create_app, origin_allowed
 from cst.broker import PaperBroker
 from cst.config import Settings
 from cst.decisions import parse_veto
 from cst.depth import DepthResult, judge_kalshi_orderbook, judge_polymarket_book
-from cst.engine import Engine
+from cst.engine import Engine, quote_on_side
 from cst.fees import kalshi_taker_fee, polymarket_taker_fee
 from cst.models import Settlement, StrategyParams
 from cst.review import govern, heuristic_updates, tighten_value
@@ -227,8 +227,11 @@ def test_governor_refuses_to_loosen_even_after_a_profitable_record():
     # A long winning record used to lower min_edge. It must not.
     rich = [Settlement("0.90–0.93", True, 0.90, 0.005, 0.05) for _ in range(100)]
     updates = heuristic_updates(params, rich)
-    assert updates.get("min_edge", params.min_edge) >= params.min_edge
-    assert "max_spread" not in updates
+    assert updates == {}
+    perfect = [Settlement("0.93–0.96", True, 0.94, 0.016, 0.04) for _ in range(30)]
+    # 30 wins out of 30 has a Wilson lower bound near 0.887, under a 0.94 all-in.
+    assert wilson_lower(30, 30) < 0.90
+    assert heuristic_updates(params, perfect) == {}
     assert tighten_value(params, "min_probability") == 0.91
     assert tighten_value(params, "scan_interval_seconds") is None
     # Raising the twin bar lets overlaps through that the old bar blocked.
@@ -462,7 +465,7 @@ def test_a_foreign_websocket_origin_is_refused(tmp_path):
 
 def test_source_never_places_an_order():
     text = "\n".join(path.read_text() for path in Path("src/cst").rglob("*.py"))
-    dashboard = "\n".join(path.read_text() for path in Path("dashboard").rglob("*") if path.suffix in {".html", ".js"})
+    dashboard = "\n".join(path.read_text() for path in DASHBOARD.rglob("*") if path.suffix in {".html", ".js"})
     assert "/portfolio/" not in text
     assert "create_and_post_order" not in text
     assert "clob.polymarket.com/order" not in text
@@ -648,3 +651,158 @@ def test_manual_close_needs_size(tmp_path):
         closed = client.post("/api/close", headers=headers, json={"id": position_id})
         assert closed.status_code == 200
         assert engine.store.positions() == []
+
+
+def test_refresh_keeps_a_book_pinned_at_the_rail():
+    market = {
+        "id": "1",
+        "question": "Pinned favorite",
+        "outcomes": ["Yes", "No"],
+        "bestBid": 0.99,
+        "bestAsk": 1,
+        "active": True,
+        "closed": False,
+        "acceptingOrders": True,
+    }
+    event = {"id": "9", "title": "Pinned"}
+    assert quotes_from_polymarket_market(market, event) == []
+    kept = quotes_from_polymarket_market(market, event, keep_extremes=True)
+    yes = next(item for item in kept if item.side == "yes")
+    assert (yes.bid, yes.ask) == (0.99, 1.0)
+    no = next(item for item in kept if item.side == "no")
+    assert no.bid == 0.0
+    kalshi = {
+        "ticker": "KXTEST-1",
+        "event_ticker": "KXTEST",
+        "title": "Pinned",
+        "status": "active",
+        "yes_bid_dollars": "0.9900",
+        "yes_ask_dollars": "1.0000",
+        "no_bid_dollars": "0.0000",
+        "no_ask_dollars": "0.0100",
+        "close_time": "2026-10-08T00:00:00Z",
+    }
+    assert quotes_from_kalshi_market(kalshi) == []
+    marked = quotes_from_kalshi_market(kalshi, keep_extremes=True)
+    assert next(item for item in marked if item.side == "yes").bid == 0.99
+
+
+def test_refresh_does_not_borrow_the_other_side(tmp_path, monkeypatch):
+    yes = make_quote(bid=0.99, ask=1.0)
+    monkeypatch.setattr("cst.engine.fetch_polymarket_market", lambda *_args, **_kwargs: [yes])
+    engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _settings: ([], []))
+    assert quote_on_side([yes], "no") is None
+    assert engine._refresh("polymarket", "m1", "no") is None
+    assert engine._refresh("polymarket", "m1", "yes").bid == 0.99
+
+
+def test_a_pinned_winner_is_marked_and_a_zero_bid_stops(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    quote = make_quote()
+    PaperBroker(engine.store).buy(quote, quote.min_shares, "cross_venue", "test", 1)
+    engine.depth = _cover
+    engine.refresher = lambda *_args: make_quote(bid=0.99, ask=1.0)
+    engine.mark_open()
+    held = engine.store.positions()[0]
+    assert held.bid == 0.99
+    assert held.mark_value > 0
+    engine.refresher = lambda *_args: make_quote(bid=0.0, ask=0.02)
+    engine.mark_open()
+    assert engine.store.positions() == []
+    assert engine.store.trades()[0].action == "sell"
+    assert engine.store.trades()[0].price == 0
+
+
+def test_a_failed_scan_is_visible(tmp_path):
+    def boom(_settings):
+        raise RuntimeError("venue down")
+
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=boom)
+    state = engine.run_cycle()
+    assert state["status"] == "error"
+    assert state["errors"]
+    assert "failed" in state["errors"][0].lower()
+    app = create_app(engine, start_loop=False)
+    with TestClient(app) as client:
+        token = client.get("/api/state").json()["csrf"]
+        scanned = client.post(
+            "/api/scan",
+            headers={"X-CSRF-Token": token, "Origin": "http://127.0.0.1:8000"},
+        )
+        assert scanned.status_code == 200
+        body = scanned.json()
+        assert body["status"] == "error"
+        assert body["errors"]
+        assert body["book"]["cash"] == 1000
+
+
+def test_a_tighten_during_the_scan_is_not_reverted(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    for _ in range(10):
+        engine.store.add_settlement(Settlement("0.93–0.96", False, 0.94, 0.02, -4))
+    spread = engine.store.params().max_spread
+
+    def fetch(_settings):
+        engine.tighten("max_spread")
+        return [], []
+
+    engine.fetcher = fetch
+    engine.run_cycle()
+    params = engine.store.params()
+    assert params.max_spread < spread
+    assert params.min_probability == 0.91
+
+
+def test_origin_follows_the_host_the_browser_called(tmp_path):
+    assert origin_allowed("http://10.1.2.3:8000", "10.1.2.3:8000")
+    assert not origin_allowed("http://10.1.2.3:8000", "127.0.0.1:8000")
+    assert origin_allowed("http://127.0.0.1:8000", "10.1.2.3:8000")
+    assert not origin_allowed("https://attacker.example", "10.1.2.3:8000")
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    app = create_app(engine, start_loop=False)
+    with TestClient(app) as client:
+        token = client.get("/api/state").json()["csrf"]
+        ok = client.post(
+            "/api/pause",
+            headers={
+                "X-CSRF-Token": token,
+                "Origin": "http://10.1.2.3:8000",
+                "Host": "10.1.2.3:8000",
+            },
+            json={"paused": True},
+        )
+        assert ok.status_code == 200
+        denied = client.post(
+            "/api/pause",
+            headers={
+                "X-CSRF-Token": token,
+                "Origin": "https://attacker.example",
+                "Host": "10.1.2.3:8000",
+            },
+            json={"paused": False},
+        )
+        assert denied.status_code == 403
+        with client.websocket_connect(
+            "/ws",
+            headers={"origin": "http://10.1.2.3:8000", "host": "10.1.2.3:8000"},
+        ) as socket:
+            assert socket.receive_json()["mode"] == "paper"
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                "/ws",
+                headers={"origin": "https://attacker.example", "host": "10.1.2.3:8000"},
+            ) as socket:
+                socket.receive_json()
+
+
+def test_dashboard_ships_with_the_package():
+    import cst
+
+    assert DASHBOARD == Path(cst.__file__).resolve().parent / "dashboard"
+    assert (DASHBOARD / "index.html").is_file()
+    assert (DASHBOARD / "app.js").is_file()
+    assert (DASHBOARD / "styles.css").is_file()

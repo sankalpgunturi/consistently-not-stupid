@@ -78,7 +78,8 @@ class PaperBroker:
         return trade
 
     def sell(self, position: Position, bid: float, reason: str) -> Trade | None:
-        if bid <= 0:
+        # Zero is a real bid on a pinned book. A missing book never reaches here.
+        if bid < 0 or bid > 1:
             return None
         fee = float(fee_for(position.fee_model, position.shares, bid, position.fee_rate, position.fee_exponent))
         proceeds = max(0.0, position.shares * bid - fee)

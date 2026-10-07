@@ -36,6 +36,22 @@ def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     return quotes, errors
 
 
+def quote_on_side(quotes: list[Quote], side: str) -> Quote | None:
+    """The quote for this side, or nothing. The other side's price is not a mark."""
+    for quote in quotes:
+        if quote.side == side:
+            return quote
+    return None
+
+
+def _shown_status(raw: str, paused: bool) -> str:
+    if raw in {"scanning", "error"}:
+        return raw
+    if paused:
+        return "paused"
+    return raw
+
+
 class Engine:
     def __init__(self, settings: Settings, store: Store | None = None, fetcher=None, reviewer: Reviewer | None = None, depth=None, decider=None):
         self.settings = settings
@@ -94,7 +110,9 @@ class Engine:
                 self.run_cycle()
             except Exception:
                 log.exception("scan failed")
-                self.store.set_status("error", {"error": "The last scan failed. The book was not changed by a fill it did not record."})
+                info = dict(self.store.cycle_info())
+                info["errors"] = ["The last scan failed. The book was not changed by a fill it did not record."]
+                self.store.set_status("error", info)
             params = self.store.params()
             self._next_scan = datetime.now(timezone.utc) + timedelta(seconds=params.scan_interval_seconds)
             self.store.set_status(self.store.status() if self.store.status() != "scanning" else "watching", self.store.cycle_info() | {"next_scan_at": self._next_scan.isoformat(timespec="seconds")})
@@ -112,104 +130,119 @@ class Engine:
         if not self._lock.acquire(blocking=False):
             return {"status": "busy"}
         try:
-            self.store.set_status("scanning")
-            started = time.time()
-            params = self.store.params()
-            quotes, errors = self.fetcher(self.settings)
-            cycle = self.store.next_cycle()
-            streaks = self.store.observe(cycle, [q.key for q in quotes if quote_in_band(q, params)])
-            book = self.store.book(streaks)
-            result = evaluate(quotes, params, book)
-            veto = self._veto(result.proposals)
-            kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
-            drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
-            kept, dropped_decisions = drop_proposals(kept, drops)
-            decisions = [item for item in result.decisions if item.action != "bought"]
-            decisions = vetoed + dropped_decisions + decisions
-            bought = 0
-            filled: set[str] = set()
-            for proposal in kept:
-                depth = self.check_depth(proposal.quote, proposal.shares, "buy")
-                if not depth.ok:
-                    decisions.append(Decision(
-                        action="skipped",
-                        reason_code="book",
-                        title=proposal.quote.title,
-                        venue=proposal.quote.venue,
-                        outcome=proposal.quote.outcome,
-                        detail=depth.detail,
-                        price=proposal.quote.ask,
-                        edge=proposal.edge,
-                        key=proposal.key,
-                    ))
-                    continue
-                # Pause and block can arrive while the model or the book read is in flight.
-                refusal = self._operator_refuses(proposal)
-                if refusal is not None:
-                    decisions.append(refusal)
-                    continue
-                trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
-                if trade is None:
-                    decisions.append(Decision(
-                        action="skipped",
-                        reason_code="budget",
-                        title=proposal.quote.title,
-                        venue=proposal.quote.venue,
-                        outcome=proposal.quote.outcome,
-                        detail="Cash was short of the venue minimum by the time this clip was reached.",
-                        price=proposal.quote.ask,
-                        edge=proposal.edge,
-                        key=proposal.key,
-                    ))
-                    continue
-                bought += 1
-                filled.add(proposal.key)
-            buys = [item for item in result.decisions if item.action == "bought" and item.key in filled]
-            decisions = buys + decisions
-            self.mark_open(locked=True)
-            settlements = self.store.settlements()
-            heuristic = heuristic_updates(params, settlements)
-            merged = merge_suggestions(heuristic, suggestions)
-            updated, notes, applied = govern(params, merged, set(heuristic), settlements)
-            if applied:
-                self.store.save_params(updated)
-                self.store.append_audit(
-                    "governor",
-                    "tighten",
-                    {key: getattr(params, key) for key in applied},
-                    applied,
-                    "Governor tightened after the settled record.",
-                )
-            summary = model_summary or heuristic_summary(result.counts, bought)
-            if model_summary and not self.reviewer.enabled:
-                summary = model_summary
-            retro = {
-                "summary": summary,
-                "applied": applied,
-                "notes": notes,
-                "source": "openai" if self.reviewer.enabled and (model_summary or suggestions or drops) else "governor",
-            }
-            self.store.add_retro(retro)
-            result.counts["bought"] = bought
-            self.store.save_decisions(cycle, decisions[:80])
-            equity = self.store.mark_equity()
-            self.store.note_peak(equity)
-            self.store.add_equity(equity)
-            info = {
-                "number": cycle,
-                "duration_seconds": round(time.time() - started, 2),
-                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "counts": result.counts,
-                "errors": errors,
-                "focus": result.focus.to_json() if result.focus else None,
-                "next_scan_at": (datetime.now(timezone.utc) + timedelta(seconds=updated.scan_interval_seconds)).isoformat(timespec="seconds"),
-            }
-            self._next_scan = datetime.fromisoformat(info["next_scan_at"])
-            paused = self._paused(updated)
-            self.store.set_status("paused" if paused else "watching", info)
-            return self.snapshot()
+            try:
+                return self._run_locked()
+            except Exception:
+                log.exception("scan failed")
+                info = dict(self.store.cycle_info())
+                info["errors"] = ["The last scan failed. The book was not changed by a fill it did not record."]
+                info["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self.store.set_status("error", info)
+                return self.snapshot()
         finally:
             self._lock.release()
+
+    def _run_locked(self) -> dict:
+        self.store.set_status("scanning")
+        started = time.time()
+        params = self.store.params()
+        quotes, errors = self.fetcher(self.settings)
+        cycle = self.store.next_cycle()
+        streaks = self.store.observe(cycle, [q.key for q in quotes if quote_in_band(q, params)])
+        book = self.store.book(streaks)
+        result = evaluate(quotes, params, book)
+        veto = self._veto(result.proposals)
+        kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
+        drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
+        kept, dropped_decisions = drop_proposals(kept, drops)
+        decisions = [item for item in result.decisions if item.action != "bought"]
+        decisions = vetoed + dropped_decisions + decisions
+        bought = 0
+        filled: set[str] = set()
+        for proposal in kept:
+            depth = self.check_depth(proposal.quote, proposal.shares, "buy")
+            if not depth.ok:
+                decisions.append(Decision(
+                    action="skipped",
+                    reason_code="book",
+                    title=proposal.quote.title,
+                    venue=proposal.quote.venue,
+                    outcome=proposal.quote.outcome,
+                    detail=depth.detail,
+                    price=proposal.quote.ask,
+                    edge=proposal.edge,
+                    key=proposal.key,
+                ))
+                continue
+            # Pause and block can arrive while the model or the book read is in flight.
+            refusal = self._operator_refuses(proposal)
+            if refusal is not None:
+                decisions.append(refusal)
+                continue
+            trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
+            if trade is None:
+                decisions.append(Decision(
+                    action="skipped",
+                    reason_code="budget",
+                    title=proposal.quote.title,
+                    venue=proposal.quote.venue,
+                    outcome=proposal.quote.outcome,
+                    detail="Cash was short of the venue minimum by the time this clip was reached.",
+                    price=proposal.quote.ask,
+                    edge=proposal.edge,
+                    key=proposal.key,
+                ))
+                continue
+            bought += 1
+            filled.add(proposal.key)
+        buys = [item for item in result.decisions if item.action == "bought" and item.key in filled]
+        decisions = buys + decisions
+        self.mark_open(locked=True)
+        settlements = self.store.settlements()
+        prior: dict[str, float] = {}
+
+        def revise(current):
+            heuristic = heuristic_updates(current, settlements)
+            merged = merge_suggestions(heuristic, suggestions)
+            revised, notes, applied_now = govern(current, merged, set(heuristic), settlements)
+            prior.update({key: getattr(current, key) for key in applied_now})
+            return revised, notes, applied_now
+
+        updated, notes, applied = self.store.revise_params(revise)
+        if applied:
+            self.store.append_audit(
+                "governor",
+                "tighten",
+                prior,
+                applied,
+                "Governor tightened after the settled record.",
+            )
+        summary = model_summary or heuristic_summary(result.counts, bought)
+        retro = {
+            "summary": summary,
+            "applied": applied,
+            "notes": notes,
+            "source": "openai" if self.reviewer.enabled and (model_summary or suggestions or drops) else "governor",
+        }
+        self.store.add_retro(retro)
+        result.counts["bought"] = bought
+        self.store.save_decisions(cycle, decisions[:80])
+        equity = self.store.mark_equity()
+        self.store.note_peak(equity)
+        self.store.add_equity(equity)
+        info = {
+            "number": cycle,
+            "duration_seconds": round(time.time() - started, 2),
+            "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "counts": result.counts,
+            "errors": errors,
+            "focus": result.focus.to_json() if result.focus else None,
+            "next_scan_at": (datetime.now(timezone.utc) + timedelta(seconds=updated.scan_interval_seconds)).isoformat(timespec="seconds"),
+        }
+        self._next_scan = datetime.fromisoformat(info["next_scan_at"])
+        paused = self._paused(updated)
+        self.store.set_status("paused" if paused else "watching", info)
+        return self.snapshot()
 
     def mark_open(self, locked: bool = False) -> None:
         if not locked and not self._lock.acquire(blocking=False):
@@ -225,9 +258,8 @@ class Engine:
                     trade = self.broker.settle(position, won)
                     self._record_settlement(position, won, trade.pnl)
                     continue
-                if quote.bid > 0:
-                    self.broker.mark(position, quote.bid)
-                if quote.bid > 0 and quote.bid <= position.entry_price - params.stop_gap:
+                self.broker.mark(position, quote.bid)
+                if 0 <= quote.bid <= position.entry_price - params.stop_gap:
                     depth = self.check_depth(quote, position.shares, "sell")
                     if not depth.ok:
                         continue
@@ -264,10 +296,7 @@ class Engine:
             quotes = fetch_kalshi_ticker(self.settings.kalshi_base_url, market_id)
         else:
             return None
-        for quote in quotes:
-            if quote.side == side:
-                return quote
-        return quotes[0] if quotes else None
+        return quote_on_side(quotes, side)
 
     def _operator_refuses(self, proposal) -> Decision | None:
         quote = proposal.quote
@@ -322,15 +351,28 @@ class Engine:
         return self.snapshot()
 
     def tighten(self, key: str) -> tuple[dict, str | None]:
-        params = self.store.params()
-        new = tighten_value(params, key)
-        if new is None:
+        change: dict[str, float] = {}
+
+        def revise(current):
+            new = tighten_value(current, key)
+            if new is None:
+                return current, [], {}
+            data = current.to_json()
+            change["old"] = data[key]
+            change["new"] = new
+            data[key] = new
+            return StrategyParams.from_json(data), [], {key: new}
+
+        _updated, _notes, applied = self.store.revise_params(revise)
+        if not applied:
             return self.snapshot(), "That knob cannot be tightened."
-        old = getattr(params, key)
-        data = params.to_json()
-        data[key] = new
-        self.store.save_params(StrategyParams.from_json(data))
-        self.store.append_audit("operator", "tighten", {key: old}, {key: new}, "The operator tightened one step.")
+        self.store.append_audit(
+            "operator",
+            "tighten",
+            {key: change["old"]},
+            {key: change["new"]},
+            "The operator tightened one step.",
+        )
         return self.snapshot(), None
 
     def close_position(self, position_id: str) -> tuple[bool, str]:
@@ -400,7 +442,7 @@ class Engine:
             "paper_age_days": round(age_days, 2),
             "operator_pause": operator_pause,
             "approved_pairs": sorted(self.store.approved_pairs()),
-            "status": "paused" if paused and self.store.status() != "scanning" else self.store.status(),
+            "status": _shown_status(self.store.status(), paused),
             "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "next_scan_at": info.get("next_scan_at") or self._next_scan.isoformat(timespec="seconds"),
             "book": {

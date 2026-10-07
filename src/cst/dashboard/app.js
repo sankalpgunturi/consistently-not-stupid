@@ -32,8 +32,11 @@ let lastStamp = "";
 function render(next) {
   state = next;
   const book = next.book || {};
-  const status = next.status === "scanning" ? "Scanning" : next.status === "paused" ? "Paused" : "Paper";
-  $("mode").textContent = status;
+  const labels = { scanning: "Scanning", paused: "Paused", error: "Scan failed" };
+  const status = labels[next.status] || "Paper";
+  const mode = $("mode");
+  mode.textContent = status;
+  mode.className = next.status === "error" ? "pill off" : "pill paper";
   $("live-mode").textContent = "Live unavailable";
   $("clock").textContent = new Date(next.server_time || Date.now()).toLocaleTimeString();
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
@@ -155,6 +158,16 @@ function renderPositions(rows) {
 }
 
 function renderTape(rows, cycle) {
+  const drafts = new Map();
+  let focused = null;
+  let caret = null;
+  document.querySelectorAll("[data-note]").forEach((el) => {
+    drafts.set(el.dataset.note, el.value);
+    if (document.activeElement === el) {
+      focused = el.dataset.note;
+      caret = el.selectionStart;
+    }
+  });
   const meta = [];
   if (cycle.number) meta.push(`Scan ${cycle.number}`);
   if (cycle.duration_seconds != null) meta.push(`${cycle.duration_seconds}s`);
@@ -173,6 +186,17 @@ function renderTape(rows, cycle) {
       </div>
     </li>
   `).join("");
+  document.querySelectorAll("[data-note]").forEach((el) => {
+    if (drafts.has(el.dataset.note)) el.value = drafts.get(el.dataset.note);
+  });
+  if (focused) {
+    const again = document.querySelector(`[data-note="${CSS.escape(focused)}"]`);
+    if (again) {
+      again.focus();
+      const pos = caret == null ? again.value.length : caret;
+      again.setSelectionRange(pos, pos);
+    }
+  }
 }
 
 function rowActions(row) {
@@ -400,7 +424,9 @@ document.body.addEventListener("click", async (event) => {
 });
 
 setInterval(() => {
-  if (state) $("next").textContent = state.status === "scanning" ? "Reading the books" : `Next scan ${countdown(state.next_scan_at)}`;
+  if (!state) return;
+  $("clock").textContent = new Date().toLocaleTimeString();
+  $("next").textContent = state.status === "scanning" ? "Reading the books" : `Next scan ${countdown(state.next_scan_at)}`;
 }, 1000);
 
 pull().catch(() => {});

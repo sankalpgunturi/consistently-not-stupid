@@ -84,7 +84,7 @@ When you are ready to talk about real orders, the names in `.env.example` are th
 - `src/cst/store.py` — the book, the audit, the operator overrides
 - `src/cst/simulate.py` — the separate model
 - `src/cst/engine.py` — the scan loop
-- `dashboard/` — the page served at `/`
+- `src/cst/dashboard/` — the page served at `/`
 - `docs/ARCHITECTURE.md` — where to look
 - `docs/GAPS.md` — choices still open
 - `AGENTS.md` — how to work in this repo

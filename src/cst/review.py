@@ -43,21 +43,23 @@ class Retro:
 
 
 def heuristic_updates(params: StrategyParams, settlements: list[Settlement]) -> dict[str, float]:
-    """Tighten when the settled record does not clear the fee. Never loosen."""
-    updates: dict[str, float] = {}
-    recent = settlements[-30:]
-    n = len(recent)
-    if n < 8:
-        return updates
-    from cst.strategy import wilson_lower
+    """Tighten one step when the recent settled book lost money after fees.
 
-    wins = sum(1 for row in recent if row.won)
-    lower = wilson_lower(wins, n)
-    avg_all_in = sum(row.price + row.fee_per_share for row in recent) / n
-    if lower + 1e-9 < avg_all_in:
-        updates["min_probability"] = params.min_probability + STEPS["min_probability"]
-        updates["min_edge"] = params.min_edge + STEPS["min_edge"]
-    return updates
+    The window is the last 30 settlements, and nothing moves before 8 of them.
+    A Wilson lower bound on that window sits near 0.89 even for 30 wins out of
+    30, which is under every favorite's all-in cost, so that comparison would
+    ratchet a perfect record up to the rail. Realized P&L already includes the
+    fee. A profitable record, including a flawless one, leaves the knobs alone.
+    """
+    recent = settlements[-30:]
+    if len(recent) < 8:
+        return {}
+    if sum(row.pnl for row in recent) >= 0:
+        return {}
+    return {
+        "min_probability": params.min_probability + STEPS["min_probability"],
+        "min_edge": params.min_edge + STEPS["min_edge"],
+    }
 
 
 def heuristic_summary(counts: dict[str, int], bought: int) -> str:
@@ -119,13 +121,16 @@ def govern(
         elif value < old - step:
             value = old - step
         value = min(hi, max(lo, value))
-        if isinstance(data[key], int) and key.endswith("_seconds") or key in {"min_stable_scans", "min_sample", "max_new_per_cycle", "scan_interval_seconds"}:
+        integer_key = key.endswith("_seconds") or key in {
+            "min_stable_scans",
+            "min_sample",
+            "max_new_per_cycle",
+        }
+        if integer_key:
             value = int(round(value))
             old_cmp = int(data[key])
         else:
             old_cmp = old
-            if key in {"min_stable_scans", "min_sample", "max_new_per_cycle"}:
-                value = int(round(value))
         if abs(float(value) - float(old_cmp)) < 1e-12:
             continue
         if _loosening(key, float(old_cmp), float(value)):
