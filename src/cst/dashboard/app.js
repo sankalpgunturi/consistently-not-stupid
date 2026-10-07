@@ -172,28 +172,34 @@ function renderTrades(rows, positions = []) {
     side: position.side, shares: position.shares, price: position.entry_price,
     fee: position.cost_basis - position.shares * position.entry_price,
     ts: position.opened_at,
-  }, exit: null}));
+  }, exit: null, position}));
   const all = [...openStories, ...stories.filter(story => story.exit).reverse()];
   const visible = all.slice(0, tradeLimit);
   $("more-trades").classList.toggle("hidden", visible.length >= all.length);
   const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
   const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
   $("trades-empty").classList.toggle("hidden", visible.length > 0);
-  $("trades").innerHTML = visible.map(({entry, exit}) => {
+  $("trades").innerHTML = visible.map(({entry, exit, position}) => {
     const row = entry || exit;
     const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
     const result = !exit ? "Open" : exit.action === "settle" ? (exit.won ? "Won" : "Lost") : stopped ? "Stop-loss" : "Sold";
     const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
     const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
     const outcomeLabel = exit?.action === "sell" ? `${exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat"} · ${result}` : result;
+    const probability = entry ? `${Number((entry.price * 100).toFixed(2))}%` : "—";
+    const closeAt = exit?.ts || position?.end_time;
+    const closeLabel = exit ? "Closed" : "Expected close";
+    const profitIfWin = position?.profit_if_win;
     return `<tr class="${outcomeClass}">
       <td class="title" data-label="Trade">${esc(row.title)}</td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
+      <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
       <td class="trade-result" data-label="Status" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
       <td data-label="Net P&amp;L" class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
+      <td class="num" data-label="Profit if won" title="Net profit after entry fees at official settlement">${!exit && Number.isFinite(profitIfWin) ? esc(`${profitIfWin > 0 ? "+" : profitIfWin < 0 ? "−" : ""}${cents(Math.abs(profitIfWin))}`) : "—"}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
-      <td class="num" data-label="Closed" title="${esc(exit ? new Date(exit.ts).toLocaleString() : "")}">${exit ? esc(time(exit.ts)) : "—"}</td>
+      <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<span class="close-estimate">Expected</span>' : ''}</td>
     </tr>`;
   }).join("");
 }

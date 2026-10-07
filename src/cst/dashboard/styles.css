@@ -339,6 +339,10 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
  .trades-layout { grid-template-columns: 1fr; }
 .trade-history td.title { min-width: 220px; }
 .trade-history td.num { white-space: nowrap; }
+.close-estimate { display: block; color: var(--muted); font-size: .72rem; margin-top: 3px; }
+.more-trades { display: block; width: 44px; height: 44px; margin: 16px auto 0; padding: 0; background: transparent; border: 0; border-radius: 8px; color: var(--muted); font: inherit; font-size: 26px; cursor: pointer; }
+.more-trades:hover { color: var(--cream); background: rgba(243, 234, 215, 0.05); }
+.more-trades:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 #benchmark { margin-bottom: 2px; }
 #benchmark-date { display: block; margin-bottom: 12px; }
 
