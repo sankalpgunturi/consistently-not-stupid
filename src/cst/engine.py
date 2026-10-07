@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import hashlib
 import threading
 import time
@@ -261,7 +262,18 @@ class Engine:
                 "sample_refusals": [item.to_json() for item in result.decisions if item.action != "bought"][:20],
                 "agent_reviews": [row["reason"] for row in self.store.audit(12) if row["actor"] == "codex"][:3],
             }
-        drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
+        review_due, review_signature = self._review_due(params, result.proposals, book, days, errors, evaluated_at)
+        if review_due:
+            drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
+            if isinstance(self.reviewer, Reviewer) and self.reviewer.enabled and not self.reviewer.last_error:
+                with self.store.lock:
+                    self.store._put("last_model_review", {"at": datetime.now(timezone.utc).isoformat(), "signature": review_signature})
+                    self.store._commit()
+        else:
+            drops, suggestions, model_summary = {}, {}, ""
+            self.reviewer.last_error = None
+            self.reviewer.last_usage = None
+            self.reviewer.concerns = []
         if getattr(self.reviewer, "last_error", None):
             errors.append(self.reviewer.last_error)
         save_reviews(self.store, days, model_summary or "Model review unavailable; deterministic daily metrics saved.",
@@ -369,6 +381,7 @@ class Engine:
             "source": "openai" if self.reviewer.enabled and (model_summary or suggestions or drops) else "governor",
             "concerns": getattr(self.reviewer, "concerns", []),
             "model_error": getattr(self.reviewer, "last_error", None),
+            "model_review_deferred": not review_due,
             "cycle": cycle,
             "actual_bought": bought,
             "proposed_updates": suggestions,
@@ -470,6 +483,24 @@ class Engine:
             pnl=pnl,
             market_id=position.market_id,
         ))
+
+    def _review_due(self, params, proposals, book, days, errors, now):
+        """Review exposure immediately; rate-limit unchanged empty-book commentary."""
+        signature = json.dumps({"params": params.to_json(), "calibration": book.calibration,
+                                "settlements": len(book.settlements), "errors": errors}, sort_keys=True)
+        if not isinstance(self.reviewer, Reviewer) or proposals or book.positions:
+            return True, signature
+        if any(row.get("review_status") == "pending" for row in days):
+            return True, signature
+        with self.store.lock:
+            last = self.store._get("last_model_review", {})
+        if last.get("signature") != signature:
+            return True, signature
+        try:
+            elapsed = (now - datetime.fromisoformat(last["at"])).total_seconds()
+        except (KeyError, ValueError, TypeError):
+            return True, signature
+        return elapsed >= 600, signature
 
     def _refresh_history(self) -> str | None:
         if self.history is None:

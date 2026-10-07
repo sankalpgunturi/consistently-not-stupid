@@ -206,3 +206,30 @@ def test_review_preserves_provider_usage_without_inventing_cost(monkeypatch):
     reviewer.api_key=''
     reviewer.review(StrategyParams(),[],{},[])
     assert reviewer.last_usage is None
+
+
+def test_empty_book_reviews_are_throttled_but_new_evidence_is_reviewed(tmp_path, monkeypatch):
+    reviewer=Reviewer('test','test')
+    calls=[]
+    def complete(payload):
+        calls.append(payload)
+        reviewer.last_usage={'total_tokens':15}
+        return {'summary':'No proposed buys.'}
+    monkeypatch.setattr(reviewer,'_complete',complete)
+    engine=Engine(Settings(data_dir=str(tmp_path)),fetcher=lambda _: ([],[]),reviewer=reviewer)
+    first=engine.run_cycle()
+    second=engine.run_cycle()
+    assert len(calls)==1
+    assert not first['retrospective']['model_review_deferred']
+    assert second['retrospective']['model_review_deferred']
+    assert second['retrospective']['model_usage']['retrospective']['usage'] is None
+    from datetime import datetime,timedelta,timezone
+    now=datetime.now(timezone.utc)
+    params=engine.store.params();book=engine.store.book({})
+    assert engine._review_due(params,[],book,[],[],now)[0] is False
+    assert engine._review_due(params,[],book,[],[],now+timedelta(minutes=11))[0] is True
+    assert engine._review_due(params,[object()],book,[],[],now)[0] is True
+    assert engine._review_due(params,[],book,[{'review_status':'pending'}],[],now)[0] is True
+    assert engine._review_due(params,[],book,[],['New venue failure'],now)[0] is True
+    book.calibration={'0.93–0.96':(1,1)}
+    assert engine._review_due(params,[],book,[],[],now)[0] is True
