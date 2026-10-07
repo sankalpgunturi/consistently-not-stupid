@@ -286,6 +286,7 @@ class Trade:
     signal: str
     reason: str
     won: int | None = None
+    side: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)

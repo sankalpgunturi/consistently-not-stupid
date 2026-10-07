@@ -338,9 +338,8 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
   border-color: var(--brass-2);
 }
 
-.trade-story + .trade-story { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 20px; }
-.trade-story-head { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
-.trade-story-head > :last-child { white-space: nowrap; }
-.trade-story p { margin: 10px 0; color: var(--dim); font-size: 0.9rem; }
-.trade-story .trade-cash { color: var(--cream); font-family: var(--mono); }
-.trade-story summary { color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+ .trades-layout { grid-template-columns: 1fr; }
+.trade-history td.title { min-width: 220px; }
+.trade-history td.num { white-space: nowrap; }
+#benchmark { margin-bottom: 2px; }
+#benchmark-date { display: block; margin-bottom: 12px; }

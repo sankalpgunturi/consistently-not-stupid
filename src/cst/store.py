@@ -148,6 +148,24 @@ class Store:
             );
             """
         )
+        trade_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(trades)")}
+        if "side" not in trade_columns:
+            self.conn.execute("ALTER TABLE trades ADD COLUMN side TEXT NOT NULL DEFAULT ''")
+            # Recover old picks only from archived positions matching entry time.
+            picks = {}
+            for row in self.conn.execute("SELECT payload FROM scans"):
+                for position in json.loads(row[0]).get("book_before", {}).get("positions", []):
+                    picks[(position["venue"], position["market_id"], position.get("opened_at"))] = position["side"]
+            held = {}
+            for row in self.conn.execute("SELECT * FROM trades ORDER BY ts, rowid").fetchall():
+                key = (row["venue"], row["market_id"])
+                if row["action"] == "buy":
+                    held[key] = picks.get((*key, row["ts"]), "")
+                side = held.get(key, "")
+                if side:
+                    self.conn.execute("UPDATE trades SET side=? WHERE id=?", (side, row["id"]))
+                if row["action"] != "buy":
+                    held.pop(key, None)
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(settlements)")}
         if "market_id" not in columns:
             self.conn.execute("ALTER TABLE settlements ADD COLUMN market_id TEXT")
@@ -436,13 +454,13 @@ class Store:
                 """
                 INSERT INTO trades (
                     id, ts, venue, market_id, title, outcome, action, shares, price,
-                    fee, pnl, cash_after, signal, reason, won
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    fee, pnl, cash_after, signal, reason, won, side
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     trade.id, trade.ts, trade.venue, trade.market_id, trade.title,
                     trade.outcome, trade.action, trade.shares, trade.price, trade.fee,
-                    trade.pnl, trade.cash_after, trade.signal, trade.reason, trade.won,
+                    trade.pnl, trade.cash_after, trade.signal, trade.reason, trade.won, trade.side,
                 ),
             )
             self._commit()
@@ -989,4 +1007,5 @@ def _trade(row: sqlite3.Row) -> Trade:
         signal=row["signal"],
         reason=row["reason"],
         won=row["won"],
+        side=row["side"],
     )

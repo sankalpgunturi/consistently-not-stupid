@@ -72,8 +72,8 @@ function render(next) {
   ).join("");
 
   const benchmark = next.benchmark || {};
-  $("benchmark").textContent = benchmark.value == null ? "S&P 500 —" :
-    `$1,000 in S&P 500 → ${money(benchmark.value)} · Close ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Stale" : ""}`;
+  $("benchmark").textContent = `S&P 500 equivalent: ${benchmark.value == null ? "—" : money(benchmark.value)}`;
+  $("benchmark-date").textContent = benchmark.as_of ? `As of ${new Date(benchmark.as_of).toLocaleDateString([], {month:"short", day:"numeric"})} close${benchmark.error ? " · Update unavailable" : ""}` : "";
   $("benchmark").title = benchmark.basis || "Adjusted daily close";
   renderEvidence(next);
   renderResearch(next.research || {});
@@ -281,18 +281,17 @@ function renderTrades(rows) {
   $("trades").innerHTML = stories.reverse().slice(0, 8).map(({entry, exit}) => {
     const row = entry || exit;
     const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
-    const result = !exit ? "Open" : exit.pnl < 0 ? `Lost ${cents(-exit.pnl)}` : `Made ${cents(exit.pnl)}`;
-    const entryLine = entry ? `${time(entry.ts)} · Bought ${entry.shares} at ${cents(entry.price)} + ${cents(entry.fee)} fee` : "Entry outside recent history";
-    const exitLine = !exit ? "Awaiting exit or settlement" : exit.action === "settle"
-      ? `${time(exit.ts)} · Settled ${exit.won ? "win" : "loss"}`
-      : `${time(exit.ts)} · ${stopped ? "Stop-loss" : "Sold"} at ${cents(exit.price)} − ${cents(exit.fee)} fee`;
-    const cashLine = entry && exit ? `${cents(entry.shares * entry.price + entry.fee)} paid → ${cents(exit.shares * exit.price - exit.fee)} returned` : "";
-    return `<article class="trade-story">
-      <div class="trade-story-head"><strong>${esc(row.title)}</strong><strong class="${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${esc(result)}</strong></div>
-      <p>${esc(entryLine)}</p><p>${esc(exitLine)}</p>
-      ${cashLine ? `<p class="trade-cash">${esc(cashLine)}</p>` : ""}
-      ${stopped ? `<details><summary>Why we exited</summary><p>${esc(exit.reason)}</p></details>` : ""}
-    </article>`;
+    const result = !exit ? "Open" : exit.action === "settle" ? (exit.won ? "Won" : "Lost") : stopped ? "Stop-loss" : "Sold";
+    const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
+    return `<tr>
+      <td class="title">${esc(row.title)}</td>
+      <td>${esc((row.side || exit?.side || "—").toUpperCase())}</td>
+      <td class="num">${esc(paid)}</td>
+      <td title="${esc(exit?.reason || "")}">${esc(result)}</td>
+      <td class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
+      <td class="num" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
+      <td class="num" title="${esc(exit ? new Date(exit.ts).toLocaleString() : "")}">${exit ? esc(time(exit.ts)) : "—"}</td>
+    </tr>`;
   }).join("");
 }
 
