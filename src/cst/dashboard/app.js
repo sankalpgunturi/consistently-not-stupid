@@ -229,7 +229,7 @@ function renderTrades(rows, positions = []) {
     const stopped = exit?.action === "sell" && /stop.loss|bid fell/i.test(exit.reason || "");
     const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
     const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
-    const outcomeLabel = !exit ? "Open" : exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat";
+    const outcomeLabel = !exit ? "Open" : exit.action === "sell" ? "Sold" : exit.won ? "Won" : "Lost";
     const probability = entry ? `${Number((entry.price * 100).toFixed(2))}%` : "—";
     const closeAt = exit?.ts || position?.end_time;
     const closeLabel = exit ? "Closed" : "Expected close";
