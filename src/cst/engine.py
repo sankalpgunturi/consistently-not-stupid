@@ -229,6 +229,14 @@ class Engine:
                 "venue_errors": errors,
                 "refusals": refusal_counts(result.decisions),
                 "refusal_counts_are_disjoint": True,
+                "stage_definitions": {
+                    "favorites": "Quotes meeting bid, ask, and spread rules.",
+                    "fee_ok": "Favorites passing fee, size, liquidity, and horizon checks.",
+                    "stable": "fee_ok quotes observed for the required consecutive scans.",
+                    "confirmed": "Stable quotes whose historical sample and lower confidence bound pass.",
+                    "kept": "Confirmed quotes selected by portfolio and correlation limits before model vetoes.",
+                    "edge": "Historical lower confidence bound minus ask and fee; null if not evaluated or sample too small.",
+                },
                 "sample_refusals": [item.to_json() for item in result.decisions if item.action != "bought"][:20],
                 "agent_reviews": [row["reason"] for row in self.store.audit(12) if row["actor"] == "codex"][:3],
             }

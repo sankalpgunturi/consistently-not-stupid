@@ -223,7 +223,7 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
                 f"Watching. The quote has been in band for {streak} scan{'s' if streak != 1 else ''}. "
                 f"It needs {need} more before a buy. {fee_detail}"
             )
-            rows.append(_Row(quote, "stability", detail, edge=-per_share, group=quote.event_id or quote.key))
+            rows.append(_Row(quote, "stability", detail, group=quote.event_id or quote.key))
             continue
         counts["stable"] += 1
         eligible.append(quote)
@@ -269,7 +269,8 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         else:
             why = f"The {bucket} bucket has {wins} wins in {sample} samples."
         detail = f"{fee_detail} {why} Its cautious win rate is {lower:.1%}; this entry needs {required:.1%}."
-        rows.append(_Row(quote, "edge", detail, edge=-per_share, group=quote.event_id or quote.key))
+        measured_edge = lower - quote.ask - per_share if sample >= params.min_sample else None
+        rows.append(_Row(quote, "edge", detail, edge=measured_edge, group=quote.event_id or quote.key))
 
     proposals: list[Proposal] = []
     for proposal in ordered:
