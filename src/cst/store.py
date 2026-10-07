@@ -100,6 +100,9 @@ class Store:
                 id INTEGER PRIMARY KEY, ts TEXT NOT NULL, position_id TEXT NOT NULL, payload TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS position_quote_lookup ON position_quotes(position_id, ts);
+            CREATE TABLE IF NOT EXISTS sale_outcomes (
+                market_id TEXT PRIMARY KEY, result TEXT, checked_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS observations (
                 cycle INTEGER NOT NULL, quote_key TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY (cycle, quote_key)
@@ -1027,6 +1030,31 @@ class Store:
                 FROM (SELECT DISTINCT venue, market_id, side FROM trades WHERE ledger = ?) t
             """, (self._ledger(),)).fetchall()
         return {row['key']: normalize_market_url(row['url']) for row in rows if row['url']}
+
+    def sale_reviews(self) -> dict:
+        """Hindsight on sold shares only; never change cash or recorded P&L."""
+        with self.lock:
+            rows = self.conn.execute("""
+                SELECT t.id, t.side, t.shares, t.price, t.fee,
+                       COALESCE(o.result, n.result) AS result
+                FROM trades t
+                LEFT JOIN sale_outcomes o ON o.market_id = t.market_id
+                LEFT JOIN near_observations n ON n.ticker = t.market_id
+                WHERE t.ledger = ? AND t.venue = 'kalshi' AND t.action = 'sell'
+            """, (self._ledger(),)).fetchall()
+        reviews = {}
+        for row in rows:
+            verdict = 'pending'
+            hold_return = advantage = None
+            sale_return = max(0, row['shares'] * row['price'] - row['fee'])
+            if row['result'] in {'yes', 'no'} and row['side'] in {'yes', 'no'}:
+                won = row['side'] == row['result']
+                verdict = 'bad' if won else 'good'
+                hold_return = row['shares'] if won else 0
+                advantage = round(sale_return - hold_return, 6)
+            reviews[row['id']] = dict(verdict=verdict, result=row['result'],
+                hold_return=hold_return, sale_return=round(sale_return, 6), advantage=advantage)
+        return reviews
 
     def paper_started_at(self) -> str:
         with self.lock:

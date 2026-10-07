@@ -85,6 +85,7 @@ function render(next) {
     positions: next.positions,
     trades: next.trades,
     trade_reviews: next.trade_reviews,
+    sale_reviews: next.sale_reviews,
     market_links: next.market_links,
     realized_curve: next.realized_curve,
     focus: next.focus,
@@ -228,8 +229,15 @@ function renderTrades(rows, positions = []) {
     const row = entry || exit;
     const stopped = exit?.action === "sell" && /stop.loss|bid fell/i.test(exit.reason || "");
     const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
-    const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
-    const outcomeLabel = !exit ? "Open" : exit.action === "sell" ? "Sold" : exit.won ? "Won" : "Lost";
+    const sale = exit?.action === "sell" ? state?.sale_reviews?.[exit.id] : null;
+    const sold = exit?.action === "sell";
+    const outcomeClass = sold ? (sale?.verdict === "good" ? "trade-win" : sale?.verdict === "bad" ? "trade-loss" : "")
+      : !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
+    const outcomeLabel = !exit ? "Open" : sold
+      ? (sale?.verdict === "good" ? "Sold ✓" : sale?.verdict === "bad" ? "Sold ✕" : "Sold …")
+      : exit.won ? "Won" : "Lost";
+    const statusMeaning = sold ? (sale?.verdict === "good" ? "Good sell: our pick ultimately lost"
+      : sale?.verdict === "bad" ? "Bad sell: our pick ultimately won" : "Sold: awaiting official result") : outcomeLabel;
     const probability = entry ? `${Number((entry.price * 100).toFixed(2))}%` : "—";
     const closeAt = exit?.ts || position?.end_time;
     const closeLabel = exit ? "Closed" : "Expected close";
@@ -258,6 +266,11 @@ function renderTrades(rows, positions = []) {
       outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${cents(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
     } else {
       outcomeStory = `${stopped ? 'Stop loss closed this bet' : 'We closed this bet'} before settlement at ${time(exit.ts)}. Received ${cents(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.${stopped ? ` ${exit.reason}` : ''}`;
+      outcomeStory += sale?.verdict === 'good'
+        ? ` Good sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have lost. Selling recovered ${cents(sale.sale_return)} instead of $0.`
+        : sale?.verdict === 'bad'
+          ? ` Bad sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have won. Holding would have returned ${cents(sale.hold_return)}, ${cents(-sale.advantage)} more than selling.`
+          : ' Waiting for the official result to see whether selling helped.';
     }
     const detailHtml = `<div class="trade-detail-body trade-story">
       <p class="trade-story-pick">We picked <strong>${esc(pick || 'an unrecorded side')}</strong>.</p>
@@ -270,7 +283,7 @@ function renderTrades(rows, positions = []) {
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
-      <td class="trade-result" data-label="Status" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
+      <td class="trade-result" data-label="Status" aria-label="${esc(statusMeaning)}" title="${esc(statusMeaning)}">${esc(outcomeLabel)}</td>
       <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<sup class="expected-mark" aria-label="expected if won">*</sup>' : ''}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
       <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<sup class="expected-mark" aria-label="expected close">*</sup>' : ''}</td>

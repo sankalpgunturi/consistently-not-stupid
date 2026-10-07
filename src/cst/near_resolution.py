@@ -32,15 +32,26 @@ def observe_and_resolve(store, settings, quotes, params, now, *, resolve=True, h
                  price_bucket(quote.ask), json.dumps(asdict(quote), default=lambda v: v.isoformat())),
             )
         store._commit()
+        if not resolve:
+            return None
+        # Sales need an official outcome even if research never sampled them.
+        store.conn.execute("""
+            INSERT OR IGNORE INTO sale_outcomes(market_id)
+            SELECT DISTINCT market_id FROM trades WHERE venue='kalshi' AND action='sell'
+        """)
+        sold = store.conn.execute(
+            "SELECT market_id FROM sale_outcomes WHERE result IS NULL ORDER BY COALESCE(checked_at, '') LIMIT 50"
+        ).fetchall()
+        store._commit()
         # Rotate unresolved observations so delayed outcomes cannot starve newer ones.
         rows = store.conn.execute(
             "SELECT ticker FROM near_observations WHERE result IS NULL ORDER BY COALESCE(checked_at, '') LIMIT 100"
         ).fetchall()
-    if not resolve or not rows:
+    tickers = list(dict.fromkeys([row['market_id'] for row in sold] + [row['ticker'] for row in rows]))[:100]
+    if not tickers:
         return None
     client = http or MarketHttp()
     try:
-        tickers = [row['ticker'] for row in rows]
         payload = client.get_json(settings.kalshi_base_url.rstrip('/') + '/markets',
                                   params={'tickers': ','.join(tickers), 'limit': '100'})
         if not isinstance(payload, dict) or not isinstance(payload.get('markets'), list):
@@ -49,6 +60,10 @@ def observe_and_resolve(store, settings, quotes, params, now, *, resolve=True, h
         with store.lock:
             for ticker in tickers:
                 result = str(markets.get(ticker, {}).get('result') or '').lower()
+                store.conn.execute(
+                    'UPDATE sale_outcomes SET result=?, checked_at=? WHERE market_id=? AND result IS NULL',
+                    (result if result in {'yes', 'no'} else None, datetime.now(timezone.utc).isoformat(), ticker),
+                )
                 store.conn.execute(
                     'UPDATE near_observations SET result=?, resolved_at=?, checked_at=? WHERE ticker=? AND result IS NULL',
                     (result if result in {'yes','no'} else None, datetime.now(timezone.utc).isoformat() if result in {'yes','no'} else None, datetime.now(timezone.utc).isoformat(), ticker),
