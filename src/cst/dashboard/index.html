@@ -24,13 +24,13 @@
   <main>
     <section class="stats" id="stats" aria-label="Account performance"></section>
     <div class="thesis status-line">
-      <span id="run-summary" role="status">Starting the simulation…</span>
+      <span id="run-summary" role="status">Paper</span>
       <span id="next">Next scan —</span>
     </div>
 
     <section class="card balance-chart">
-      <div class="card-head"><h2>Balance over time</h2><p class="muted" id="starting-balance">Started with $1,000</p></div>
-      <p class="muted" id="benchmark" aria-live="polite">S&amp;P 500 comparison loading…</p>
+      <div class="card-head"><h2>Balance</h2></div>
+      <p class="muted" id="benchmark" aria-live="polite">S&amp;P 500 —</p>
       <canvas id="equity" width="1100" height="190" aria-label="Paper account balance over time"></canvas>
     </section>
 
@@ -41,7 +41,7 @@
           <thead><tr><th>Contract</th><th>Cost</th><th>Value</th><th>If won</th><th>If lost</th><th></th></tr></thead>
           <tbody id="positions"></tbody>
         </table></div>
-        <p class="empty" id="positions-empty">Waiting for a qualifying trade.</p>
+        <p class="empty" id="positions-empty">None</p>
       </article>
       <article class="card">
         <div class="card-head"><h2>Recent trades</h2></div>
@@ -49,23 +49,25 @@
           <thead><tr><th>Time</th><th>Trade</th><th>Price</th><th>Fee</th><th>P&amp;L</th></tr></thead>
           <tbody id="trades"></tbody>
         </table></div>
-        <p class="empty" id="trades-empty">No trades yet.</p>
+        <p class="empty" id="trades-empty">None</p>
       </article>
     </section>
 
     <details class="card disclosure">
-      <summary>Activity &amp; analysis</summary>
+      <summary>Details</summary>
       <section class="evidence" id="evidence" aria-label="Account details"></section>
       <div class="card-head section-heading"><h2>Latest scan</h2><p class="muted" id="scan-meta">—</p></div>
       <section class="funnel" id="funnel"></section>
-      <p class="muted coverage">Coverage is a subset of Kalshi markets.</p>
+
       <details class="inner-disclosure"><summary>Decisions</summary>
         <div id="focus"><h3 id="focus-title">Waiting for scan</h3><p id="focus-detail"></p></div>
         <ol class="tape" id="tape"></ol><p class="empty" id="tape-empty">No decisions yet.</p>
       </details>
+      <details class="inner-disclosure"><summary>Review</summary>
       <div class="card-head section-heading"><h2>Review</h2><p class="muted" id="retro-source"></p></div>
       <p id="retro" class="prose">Waiting for scan.</p><ul id="retro-notes" class="notes"></ul>
-      <details class="inner-disclosure"><summary>Historical evidence</summary>
+      </details>
+      <details class="inner-disclosure"><summary>Research</summary>
         <p class="muted" id="research-counts"></p>
         <div class="table-wrap"><table>
           <thead><tr><th>Price bucket</th><th>Samples</th><th>Wins</th><th>Lower bound</th></tr></thead>
@@ -88,25 +90,8 @@
       <button type="button" id="reset" class="text-btn reset-control">Reset paper account</button>
     </details>
 
-    <details class="card disclosure">
-      <summary>About this experiment</summary>
-      <p class="prose">One month of simulated trades before evaluating live trading. No real orders.</p>
-      <blockquote class="vision">
-        <p>It is remarkable how much long-term advantage people like us have gotten by trying to be consistently not stupid, instead of trying to be very intelligent.</p>
-        <cite>Charlie Munger</cite>
-      </blockquote>
-      <details class="inner-disclosure"><summary>Our strategy</summary>
-        <ul class="prose">
-          <li>High confidence: target outcomes above 90%.</li>
-          <li>Short horizon: enter within 10 minutes of the expected outcome.</li>
-          <li>Small stakes: spread roughly $1 bets across independent outcomes.</li>
-          <li>Daily target: finish each 24 hours at or above its starting value, after fees.</li>
-        </ul>
-        <p class="muted">One $1,000 contribution. Reinvest proceeds. Individual losses are allowed; daily profit and long-term capital preservation are targets, not guarantees.</p>
-      </details>
-    </details>
   </main>
-  <footer class="foot"><p>Simulated funds · Scans about every minute</p></footer>
+  <footer class="foot"><p>Paper trading</p></footer>
   <script src="/static/app.js"></script>
 </body>
 </html>

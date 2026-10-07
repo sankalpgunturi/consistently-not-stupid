@@ -69,20 +69,19 @@ function render(next) {
   const multiple = (value) => value == null ? "—" : `${value.toFixed(3)}×`;
   const tone = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
   const cards = [
-    ["Account value", money(book.equity), "", `${multiple(book.start ? book.equity / book.start : null)} initial capital`],
-    ["Total profit", money(totalGain), tone(totalGain), `Since ${money(book.start)} · After trading fees`],
+    ["Account value", money(book.equity), "", multiple(book.start ? book.equity / book.start : null)],
+    ["Total profit", money(totalGain), tone(totalGain), ""],
     ["Last 24 hours", money(recent.net_pnl || 0), tone(recent.net_pnl || 0),
-      `${multiple(recent.multiple)} · ${recent.partial ? "Since start" : "vs. 24 hours ago"}`],
+      multiple(recent.multiple)],
   ];
   $("stats").innerHTML = cards.map(([label, value, color, detail]) =>
     `<div class="stat ${color}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`
   ).join("");
-  $("starting-balance").textContent = `Started with ${money(book.start)}`;
 
   const benchmark = next.benchmark || {};
-  $("benchmark").textContent = benchmark.value == null ? "S&P 500 comparison unavailable" :
-    `S&P 500 (SPY): ${money(benchmark.value)} · ${multiple(benchmark.multiple)} · Algorithm ${money(Math.abs(benchmark.ahead_by))} ${benchmark.ahead_by >= 0 ? "ahead" : "behind"} · Close ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Update unavailable" : ""}`;
-  $("benchmark").title = benchmark.basis || "Adjusted daily closes from Yahoo Finance; no assumed annual return.";
+  $("benchmark").textContent = benchmark.value == null ? "S&P 500 —" :
+    `S&P 500 ${money(benchmark.value)} · ${multiple(benchmark.multiple)} · ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Stale" : ""}`;
+  $("benchmark").title = benchmark.basis || "Adjusted daily close";
   renderEvidence(next);
   renderResearch(next.research || {});
   const old = document.querySelector(".banner");
@@ -102,14 +101,8 @@ function render(next) {
   }
 
   const counts = next.counts || {};
-  let activity = `${counts.markets_read || 0} markets checked`;
-  if (next.status === "scanning") activity = "Scanning markets…";
-  else if (next.status === "error") activity = "Scan failed · retrying on schedule";
-  else if (book.entries_paused) activity = "New trades paused";
-  else if (counts.bought) activity += ` · ${counts.bought} new paper trade${counts.bought === 1 ? "" : "s"}`;
-  else if (!counts.confirmed && counts.stable) activity += " · Waiting for stronger evidence";
-  else activity += " · Watching for a qualifying trade";
-  $("run-summary").textContent = activity;
+  $("run-summary").textContent = next.status === "error" ? "Scan failed" :
+    book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
   const steps = [
     [counts.markets_read, "markets read"],
     [counts.favorites, "favorites"],
@@ -224,7 +217,7 @@ function rowActions(row) {
 }
 
 function renderRetro(retro, llm) {
-  $("retro-source").textContent = retro?.source === "openai" ? `OpenAI ${llm.model} · governor still decides` : "Built-in governor";
+  $("retro-source").textContent = "";
   $("retro").textContent = retro?.summary || "The note appears after the first pass.";
   const notes = [...(retro?.notes || []), ...(retro?.concerns || [])];
   if (retro?.model_error) notes.push(retro.model_error);
@@ -237,7 +230,7 @@ function renderResearch(research) {
   if (near) $("research-counts").textContent += ` · ${near.observed_events} near-outcome events observed, ${near.resolved_events} resolved`;
   const rows = research.calibration || [];
   $("calibration").innerHTML = rows.map(row => `<tr><td>${esc(row.bucket)}</td><td>${esc(row.samples)}</td><td>${esc(row.wins)}</td><td>${esc((row.lower_bound * 100).toFixed(1))}%</td></tr>`).join("");
-  $("research-note").textContent = rows.length ? "A bucket needs at least 30 samples, and its cautious win rate must exceed the ask, fee, and required edge. Passing the sample minimum alone does not admit a trade." : "Historical samples are still being collected. The account stays in cash until the entry rule passes.";
+  $("research-note").textContent = "";
 }
 
 function renderKnobs(rows) {
@@ -245,7 +238,7 @@ function renderKnobs(rows) {
     <div class="knob">
       <b>${esc(row.label)}</b>
       <em>${esc(formatKnob(row))}</em>
-      <small>${esc(row.help)} Rail ${esc(row.min)}–${esc(row.max)}.</small>
+
       ${row.adjustable === false ? "" : `<button type="button" class="mini" data-tighten="${esc(row.key)}">Tighten</button>`}
     </div>
   `).join("");
