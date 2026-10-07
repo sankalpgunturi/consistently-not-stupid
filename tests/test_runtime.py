@@ -174,3 +174,22 @@ def test_discovery_window_boundaries_respect_configured_limits():
     windows = discovery_windows(0, 2, 21)
     assert windows == [(7200, 86400), (86399, 604800), (604799, 1814400)]
     assert discovery_windows(0, 2, 3) == [(7200, 86400), (86399, 259200)]
+
+
+def test_review_sees_active_timing_and_explicit_side(monkeypatch):
+    from datetime import timedelta
+    from cst.models import StrategyParams, Proposal
+    from tests.conftest import make_quote, NOW
+    reviewer = Reviewer('test-key','test')
+    seen = {}
+    def complete(payload):
+        seen.update(payload)
+        return {'summary':'No change.'}
+    monkeypatch.setattr(reviewer,'_complete',complete)
+    q=make_quote(side='no',expected_resolution_time=NOW+timedelta(minutes=5))
+    reviewer.review(StrategyParams(entry_window_minutes=10),[Proposal(q,1,.02,'learned','fixture','fixture')],{},[])
+    assert seen['entry_timing']['entry_window_minutes']==10
+    assert 'min_hours_to_expiry' not in seen['knobs']
+    assert 'max_days_to_expiry' not in seen['knobs']
+    assert seen['proposals'][0]['side']=='no'
+    assert seen['proposals'][0]['expected_resolution_time']==q.expected_resolution_time.isoformat()
