@@ -147,6 +147,15 @@ class Store:
                 self.conn.commit()
             return updated, notes, applied
 
+    def governor_seen(self) -> int:
+        with self.lock:
+            return int(self._get("governor_seen", 0) or 0)
+
+    def set_governor_seen(self, count: int) -> None:
+        with self.lock:
+            self._put("governor_seen", int(count))
+            self.conn.commit()
+
     def cash(self) -> float:
         with self.lock:
             return float(self._get("cash", self.bankroll))

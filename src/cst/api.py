@@ -1,8 +1,8 @@
 """Dashboard and the small JSON API the page polls.
 
-Mutating routes require the token from GET /api/state. When a browser sends
-Origin, it has to be this host or localhost. The snapshot socket uses the
-same rule. There is no login and no route that sends an order.
+Mutating routes require the token from GET /api/state. Origin and Host have
+to be localhost or the host the desk was bound to, including the state read
+and the snapshot socket. There is no login and no route that sends an order.
 """
 
 from __future__ import annotations
@@ -56,21 +56,40 @@ def _hostname(value: str | None) -> str:
     return text.split(":")[0]
 
 
-def origin_allowed(origin: str | None, host_header: str | None) -> bool:
-    """Allow a missing Origin, localhost, or the host the browser actually called.
+_WILDCARD = {"0.0.0.0", "::", "[::]"}
 
-    `--host` can be any interface. A page opened at that address sends Origin
-    and Host for the same name. A foreign site's Origin does not match Host.
+
+def allowed_names(bind_host: str) -> set[str]:
+    """Loopback, plus the concrete host the process was bound to.
+
+    ``0.0.0.0`` is not a name a browser sends. A wildcard bind trusts only
+    loopback. Pass ``--host 192.168.1.5`` to open the page at that address.
     """
+    names = set(_LOCAL)
+    host = _hostname(bind_host)
+    if host and host not in _WILDCARD:
+        names.add(host)
+    return names
+
+
+def origin_allowed(origin: str | None, bind_host: str) -> bool:
+    """A missing Origin is left to the Host check. A present one must be a name we bound."""
     if not origin:
         return True
     origin_host = (urlparse(origin).hostname or "").lower()
-    if origin_host in _LOCAL:
-        return True
-    return bool(origin_host) and origin_host == _hostname(host_header)
+    return bool(origin_host) and origin_host in allowed_names(bind_host)
 
 
-def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
+def host_allowed(host_header: str | None, bind_host: str) -> bool:
+    """The Host header has to be the bind host, not whatever Origin agrees with.
+
+    A DNS-rebinding page can make Origin and Host both say the attacker's name
+    while the packet arrives on the local interface.
+    """
+    return _hostname(host_header) in allowed_names(bind_host)
+
+
+def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if start_loop:
@@ -80,17 +99,22 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
 
     app = FastAPI(title="Consistently Not Stupid", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.engine = engine
+    app.state.bind_host = bind_host or engine.settings.host or "127.0.0.1"
     if DASHBOARD.exists():
         app.mount("/static", StaticFiles(directory=DASHBOARD), name="static")
 
     @app.middleware("http")
     async def csrf(request, call_next):
-        if request.method == "POST" and request.url.path.startswith("/api/"):
-            token = request.headers.get("x-csrf-token")
-            if not token or token != engine.store.csrf():
-                return JSONResponse({"error": "Missing or bad CSRF token."}, status_code=403)
-            if not origin_allowed(request.headers.get("origin"), request.headers.get("host")):
+        if request.url.path.startswith("/api/"):
+            bound = app.state.bind_host
+            if not host_allowed(request.headers.get("host"), bound):
+                return JSONResponse({"error": "Foreign host."}, status_code=403)
+            if not origin_allowed(request.headers.get("origin"), bound):
                 return JSONResponse({"error": "Foreign origin."}, status_code=403)
+            if request.method == "POST":
+                token = request.headers.get("x-csrf-token")
+                if not token or token != engine.store.csrf():
+                    return JSONResponse({"error": "Missing or bad CSRF token."}, status_code=403)
         return await call_next(request)
 
     @app.get("/")
@@ -152,7 +176,8 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
-        if not origin_allowed(socket.headers.get("origin"), socket.headers.get("host")):
+        bound = app.state.bind_host
+        if not host_allowed(socket.headers.get("host"), bound) or not origin_allowed(socket.headers.get("origin"), bound):
             await socket.close(code=1008)
             return
         await socket.accept()

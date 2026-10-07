@@ -199,16 +199,21 @@ class Engine:
         decisions = buys + decisions
         self.mark_open(locked=True)
         settlements = self.store.settlements()
+        seen = self.store.governor_seen()
         prior: dict[str, float] = {}
+        heuristic_keys: set[str] = set()
 
         def revise(current):
-            heuristic = heuristic_updates(current, settlements)
+            heuristic = heuristic_updates(current, settlements, seen)
+            heuristic_keys.update(heuristic)
             merged = merge_suggestions(heuristic, suggestions)
             revised, notes, applied_now = govern(current, merged, set(heuristic), settlements)
             prior.update({key: getattr(current, key) for key in applied_now})
             return revised, notes, applied_now
 
         updated, notes, applied = self.store.revise_params(revise)
+        if any(key in heuristic_keys for key in applied):
+            self.store.set_governor_seen(len(settlements))
         if applied:
             self.store.append_audit(
                 "governor",

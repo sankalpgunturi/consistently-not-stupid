@@ -42,7 +42,11 @@ class Retro:
         }
 
 
-def heuristic_updates(params: StrategyParams, settlements: list[Settlement]) -> dict[str, float]:
+def heuristic_updates(
+    params: StrategyParams,
+    settlements: list[Settlement],
+    seen: int = 0,
+) -> dict[str, float]:
     """Tighten one step when the recent settled book lost money after fees.
 
     The window is the last 30 settlements, and nothing moves before 8 of them.
@@ -50,7 +54,12 @@ def heuristic_updates(params: StrategyParams, settlements: list[Settlement]) -> 
     30, which is under every favorite's all-in cost, so that comparison would
     ratchet a perfect record up to the rail. Realized P&L already includes the
     fee. A profitable record, including a flawless one, leaves the knobs alone.
+
+    ``seen`` is the settlement count at the last tighten. The same losing
+    window does not move the knobs again until a new settlement arrives.
     """
+    if len(settlements) <= seen:
+        return {}
     recent = settlements[-30:]
     if len(recent) < 8:
         return {}

@@ -65,7 +65,7 @@ def main() -> None:
 
     host = args.host or settings.host
     port = args.port or settings.port
-    uvicorn.run(create_app(engine), host=host, port=port, log_level="info")
+    uvicorn.run(create_app(engine, bind_host=host), host=host, port=port, log_level="info")
 
 
 def _bench(settings) -> None:

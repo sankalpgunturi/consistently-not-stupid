@@ -7,7 +7,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from cst.api import DASHBOARD, create_app, origin_allowed
+from cst.api import DASHBOARD, create_app, host_allowed, origin_allowed
 from cst.broker import PaperBroker
 from cst.config import Settings
 from cst.decisions import parse_veto
@@ -414,7 +414,7 @@ def test_dashboard_and_health(tmp_path):
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.refresher = lambda *_args: None
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         health = client.get("/api/health")
         assert health.status_code == 200
         page = client.get("/")
@@ -443,10 +443,10 @@ def test_websocket_sends_the_paper_snapshot(tmp_path):
     settings = Settings(data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as socket:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        with client.websocket_connect("/ws", headers={"host": "127.0.0.1"}) as socket:
             payload = socket.receive_json()
-        with client.websocket_connect("/ws", headers={"origin": "http://localhost:8000"}) as socket:
+        with client.websocket_connect("/ws", headers={"origin": "http://localhost:8000", "host": "127.0.0.1"}) as socket:
             local = socket.receive_json()
     assert payload["mode"] == "paper"
     assert payload["live"] == "unavailable"
@@ -457,9 +457,9 @@ def test_a_foreign_websocket_origin_is_refused(tmp_path):
     settings = Settings(data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/ws", headers={"origin": "https://attacker.example"}) as socket:
+            with client.websocket_connect("/ws", headers={"origin": "https://attacker.example", "host": "127.0.0.1"}) as socket:
                 socket.receive_json()
 
 
@@ -609,7 +609,7 @@ def test_pause_block_and_tighten_stick(tmp_path):
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.refresher = lambda *_args: None
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         token = client.get("/api/state").json()["csrf"]
         headers = {"X-CSRF-Token": token}
         paused = client.post("/api/pause", headers=headers, json={"paused": True})
@@ -641,7 +641,7 @@ def test_manual_close_needs_size(tmp_path):
     engine.refresher = lambda *_args: quote
     engine.depth = lambda _q, _s, _a: DepthResult(False, 0, "The size on the bid is 1, short of 5.")
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         token = client.get("/api/state").json()["csrf"]
         headers = {"X-CSRF-Token": token}
         refused = client.post("/api/close", headers=headers, json={"id": position_id})
@@ -725,7 +725,7 @@ def test_a_failed_scan_is_visible(tmp_path):
     assert state["errors"]
     assert "failed" in state["errors"][0].lower()
     app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         token = client.get("/api/state").json()["csrf"]
         scanned = client.post(
             "/api/scan",
@@ -756,16 +756,45 @@ def test_a_tighten_during_the_scan_is_not_reverted(tmp_path):
     assert params.min_probability == 0.91
 
 
-def test_origin_follows_the_host_the_browser_called(tmp_path):
-    assert origin_allowed("http://10.1.2.3:8000", "10.1.2.3:8000")
-    assert not origin_allowed("http://10.1.2.3:8000", "127.0.0.1:8000")
-    assert origin_allowed("http://127.0.0.1:8000", "10.1.2.3:8000")
-    assert not origin_allowed("https://attacker.example", "10.1.2.3:8000")
+def test_a_losing_window_tightens_once_until_the_next_settlement(tmp_path):
+    losses = [Settlement("0.93–0.96", False, 0.94, 0.02, -4) for _ in range(10)]
+    params = StrategyParams()
+    assert heuristic_updates(params, losses, seen=len(losses)) == {}
+    assert heuristic_updates(params, losses, seen=0)["min_probability"] == 0.91
     settings = Settings(data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
-    app = create_app(engine, start_loop=False)
-    with TestClient(app) as client:
-        token = client.get("/api/state").json()["csrf"]
+    for row in losses:
+        engine.store.add_settlement(row)
+    engine.run_cycle()
+    assert engine.store.params().min_probability == 0.91
+    edge = engine.store.params().min_edge
+    engine.run_cycle()
+    assert engine.store.params().min_probability == 0.91
+    assert engine.store.params().min_edge == edge
+    engine.store.add_settlement(Settlement("0.93–0.96", False, 0.94, 0.02, -4))
+    engine.run_cycle()
+    assert engine.store.params().min_probability == 0.92
+    assert engine.store.params().min_edge > edge
+
+
+def test_origin_follows_the_bound_host(tmp_path):
+    assert origin_allowed("http://10.1.2.3:8000", "10.1.2.3")
+    assert not origin_allowed("http://10.1.2.3:8000", "127.0.0.1")
+    assert origin_allowed("http://127.0.0.1:8000", "10.1.2.3")
+    assert not origin_allowed("https://attacker.example", "10.1.2.3")
+    assert host_allowed("10.1.2.3:8000", "10.1.2.3")
+    assert host_allowed("localhost:8000", "10.1.2.3")
+    assert not host_allowed("attacker.example", "127.0.0.1")
+    assert not host_allowed("10.1.2.3:8000", "0.0.0.0")
+    assert host_allowed("127.0.0.1:8000", "0.0.0.0")
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    app = create_app(engine, start_loop=False, bind_host="10.1.2.3")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        rebound = client.get("/api/state", headers={"Host": "attacker.example", "Origin": "http://attacker.example"})
+        assert rebound.status_code == 403
+        assert "csrf" not in rebound.text
+        token = client.get("/api/state", headers={"Host": "10.1.2.3:8000"}).json()["csrf"]
         ok = client.post(
             "/api/pause",
             headers={
@@ -776,16 +805,16 @@ def test_origin_follows_the_host_the_browser_called(tmp_path):
             json={"paused": True},
         )
         assert ok.status_code == 200
-        denied = client.post(
+        agreed = client.post(
             "/api/pause",
             headers={
                 "X-CSRF-Token": token,
                 "Origin": "https://attacker.example",
-                "Host": "10.1.2.3:8000",
+                "Host": "attacker.example",
             },
             json={"paused": False},
         )
-        assert denied.status_code == 403
+        assert agreed.status_code == 403
         with client.websocket_connect(
             "/ws",
             headers={"origin": "http://10.1.2.3:8000", "host": "10.1.2.3:8000"},
@@ -794,7 +823,7 @@ def test_origin_follows_the_host_the_browser_called(tmp_path):
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/ws",
-                headers={"origin": "https://attacker.example", "host": "10.1.2.3:8000"},
+                headers={"origin": "http://attacker.example", "host": "attacker.example"},
             ) as socket:
                 socket.receive_json()
 
