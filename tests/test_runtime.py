@@ -232,6 +232,8 @@ def test_empty_book_reviews_are_throttled_but_new_evidence_is_reviewed(tmp_path,
     assert engine._review_due(params,[],book,[{'review_status':'pending'}],[],now)[0] is True
     assert engine._review_due(params,[],book,[],['New venue failure'],now)[0] is True
     book.calibration={'0.93–0.96':(1,1)}
+    assert engine._review_due(params,[],book,[],[],now)[0] is False
+    book.settlements.append(object())
     assert engine._review_due(params,[],book,[],[],now)[0] is True
 
 
@@ -316,3 +318,17 @@ def test_latest_model_review_survives_routine_scans(tmp_path):
         store.add_retro({'source': 'governor', 'summary': 'No new buys.'})
     assert store.latest_model_review()['summary'] == 'Review of the actual trades.'
     assert store.retros(1)[0]['source'] == 'governor'
+
+
+def test_legacy_evidence_still_triggers_review(tmp_path):
+    from datetime import datetime, timezone
+    engine = Engine(Settings(data_dir=str(tmp_path), entry_window_minutes=0), fetcher=lambda _: ([], []))
+    params, book = engine.store.params(), engine.store.book({})
+    now = datetime.now(timezone.utc)
+    _, signature = engine._review_due(params, [], book, [], [], now)
+    with engine.store.lock:
+        engine.store._put('last_model_review', {'at': now.isoformat(), 'signature': signature})
+        engine.store._commit()
+    assert not engine._review_due(params, [], book, [], [], now)[0]
+    book.calibration = {'0.93–0.96': (1, 1)}
+    assert engine._review_due(params, [], book, [], [], now)[0]

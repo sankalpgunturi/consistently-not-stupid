@@ -516,7 +516,11 @@ class Engine:
 
     def _review_due(self, params, proposals, book, days, errors, now):
         """Review exposure immediately; rate-limit unchanged empty-book commentary."""
-        signature = json.dumps({"params": params.to_json(), "calibration": book.calibration,
+        # Near-window observations are research, not admission evidence. Batch
+        # those updates into routine reviews instead of re-reviewing an unchanged
+        # portfolio after every unrelated venue settlement.
+        signature = json.dumps({"params": params.to_json(),
+                                "calibration": book.calibration if params.entry_window_minutes == 0 else None,
                                 "settlements": len(book.settlements), "errors": errors}, sort_keys=True)
         if not isinstance(self.reviewer, Reviewer) or proposals:
             return True, signature
