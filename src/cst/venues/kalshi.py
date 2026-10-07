@@ -171,22 +171,24 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     return quotes
 
 
-def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int] | None] | None = None, priority_page_size: int | None = None) -> tuple[list[Quote], str | None]:
+def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int] | None] | None = None, priority_page_size: int | None = None, prioritize_nearest: bool = False) -> tuple[list[Quote], str | None]:
     own = http is None
     client = http or MarketHttp()
     quotes: list[Quote] = []
     root = base_url.rstrip("/")
     try:
         windows = close_windows or [close_window]
-        # Round-robin allocation gives the earliest window twice the weight.
-        # The default eight-page budget becomes four near, two medium, two far.
+        # Near-resolution scans reserve one request per broader window, then
+        # spend the rest nearest-first. Legacy scans retain weighted allocation.
         pattern = list(range(len(windows))) + [0]
         budgets = [0] * len(windows)
         for index in range(max(0, pages)):
-            budgets[pattern[index % len(pattern)]] += 1
+            target = (index if index < len(windows) else 0) if prioritize_nearest else pattern[index % len(pattern)]
+            budgets[target] += 1
         unique: dict[str, dict] = {}
         for window_index, (window, budget) in enumerate(zip(windows, budgets)):
             cursor = ""
+            used = 0
             for _ in range(budget):
                 limit = min(1000, max(page_size, priority_page_size or page_size)) if window_index == 0 else page_size
                 params = {"status": "open", "limit": str(limit), "mve_filter": "exclude"}
@@ -196,6 +198,7 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
                     params.update(min_close_ts=str(window[0]), max_close_ts=str(window[1]))
                 if cursor:
                     params["cursor"] = cursor
+                used += 1
                 payload = client.get_json(f"{root}/markets", params=params)
                 if not isinstance(payload, dict):
                     break
@@ -206,6 +209,13 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
                 cursor = payload.get("cursor") or ""
                 if not cursor or not batch:
                     break
+            if prioritize_nearest:
+                later = len(windows) - window_index - 1
+                if later:
+                    for spare in range(budget - used):
+                        budgets[window_index + 1 + spare % later] += 1
+                if window_index == 0 and budget and used == budget and cursor:
+                    log.warning("Near-term discovery reached its %s-page limit with more markets available.", budget)
         markets = list(unique.values())
         events = _event_titles(client, root, markets)
         series, fee_errors = _series_fees(client, root, markets)

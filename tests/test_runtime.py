@@ -271,3 +271,39 @@ def test_priority_window_uses_larger_pages_without_expanding_broad_requests():
     assert [c['limit'] for c in calls]==['1000','200','200']
     assert calls[0]['max_close_ts']=='200'
     assert calls[-1]['status']=='open'
+
+
+@pytest.mark.parametrize('nearest_pages,expected', [(1,[1,3,2,2]),(3,[3,2,2,1]),(4,[4,2,1,1]),(99,[5,1,1,1])])
+def test_nearest_discovery_reuses_spare_pages_without_exceeding_budget(nearest_pages,expected):
+    calls=[]
+    counts=[0,0,0,0]
+    class Http:
+        def get_json(self,_url,params=None):
+            calls.append(dict(params))
+            index=int(params['min_close_ts'])//100-1 if 'min_close_ts' in params else 3
+            counts[index]+=1
+            # Low bids avoid unrelated event and fee metadata requests.
+            market={'ticker':f'M{index}-{counts[index]}','status':'active',
+                    'yes_bid_dollars':'.40','yes_ask_dollars':'.41',
+                    'no_bid_dollars':'.59','no_ask_dollars':'.60'}
+            cursor='' if index==0 and counts[0]>=nearest_pages else str(counts[index])
+            return {'markets':[market],'cursor':cursor}
+    quotes,error=fetch_kalshi('https://example.invalid',8,200,http=Http(),
+        close_windows=[(100,200),(200,300),(300,400),None],
+        priority_page_size=1000,prioritize_nearest=True)
+    assert error is None
+    assert counts==expected
+    assert len(calls)==8
+    assert len({q.market_id for q in quotes})==8
+    assert all(c['limit']==('1000' if c.get('min_close_ts')=='100' else '200') for c in calls)
+
+
+def test_nearest_discovery_respects_budget_smaller_than_window_count():
+    calls=[]
+    class Http:
+        def get_json(self,_url,params=None):
+            calls.append(params)
+            return {'markets':[], 'cursor':''}
+    fetch_kalshi('https://example.invalid',2,200,http=Http(),
+        close_windows=[(100,200),(200,300),(300,400),None],prioritize_nearest=True)
+    assert len(calls)==2
