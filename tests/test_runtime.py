@@ -7,6 +7,7 @@ from cst.review import Reviewer
 from cst.broker import PaperBroker
 from cst.store import Store
 from cst.models import StrategyParams
+from cst.venues.kalshi import fetch_kalshi
 from tests.conftest import make_quote
 
 
@@ -104,3 +105,19 @@ def test_settlement_is_recorded_once_and_failure_restores_position(tmp_path, mon
     assert engine.broker.settle(position, True) is None
     assert engine.broker.sell(position, 1, "already closed") is None
     assert engine.store.cash() == pytest.approx(cash + 1)
+
+
+def test_market_discovery_filters_window_and_excludes_inactive_payloads():
+    calls = []
+    market = {"ticker": "KXTEST", "status": "active", "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.41",
+              "no_bid_dollars": "0.59", "no_ask_dollars": "0.60"}
+
+    class Http:
+        def get_json(self, _url, params=None):
+            calls.append(params)
+            return {"markets": [market, dict(market, ticker="CLOSED", status="closed"), dict(market, ticker="FUTURE", status="inactive")], "cursor": ""}
+
+    quotes, error = fetch_kalshi("https://example.invalid", 8, 200, http=Http(), close_window=(100, 200))
+    assert error is None
+    assert {q.market_id for q in quotes} == {"KXTEST"}
+    assert calls == [{"limit": "200", "mve_filter": "exclude", "min_close_ts": "100", "max_close_ts": "200"}]

@@ -24,7 +24,9 @@ log = logging.getLogger("cst.engine")
 
 
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
-    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
+    now = datetime.now(timezone.utc).timestamp()
+    window = (int(now + settings.min_hours_to_expiry * 3600), int(now + settings.max_days_to_expiry * 86400))
+    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_window=window)
     return quotes, [err] if err else []
 
 

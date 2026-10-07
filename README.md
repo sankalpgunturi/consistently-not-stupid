@@ -48,7 +48,7 @@ Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or t
 
 The status line stays **Paper** and **Live planned**. There is no control that arms a live order. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips. The simulation record shows archived observations and historical sample sizes separately from this account's results. A fill is an open position, not a confirmed win.
 
-The funnel is the scan: markets read, quotes at the bar, quotes the fee still leaves a profit on, quotes that held still, quotes the settled record calls cheap, and clips actually bought. The counts are the first pages of open Kalshi markets, not every contract.
+Open **Activity & analysis** for scan counts, reviews, and historical evidence. **Settings** contains controls and risk parameters. The scan reads a bounded number of market pages within the configured closing-time window, then checks each active contract against the current rules. It does not cover every contract.
 
 You can pause new buys, block a contract, close a paper clip when the book has size, and tighten a risk knob by one step. You cannot force a buy the fee rule or the settled record refused. Those changes are listed under "What changed by hand." Mutating requests send the token from the page's own state.
 
@@ -91,7 +91,7 @@ When you are ready to talk about real orders, the names in `.env.example` are th
 - `docs/GAPS.md` — choices still open
 - `AGENTS.md` — how to work in this repo
 
-The scan covers the first pages of open Kalshi markets, excluding multivariate combos. It is a wide net, not a claim to have read every contract. The funnel shows the counts.
+The scan filters by closing time and excludes multivariate combos and inactive contracts. It reads a bounded number of pages. Activity & analysis shows the counts.
 
 ## References
 

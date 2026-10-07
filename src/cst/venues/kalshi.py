@@ -160,7 +160,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     return quotes
 
 
-def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None) -> tuple[list[Quote], str | None]:
+def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None) -> tuple[list[Quote], str | None]:
     own = http is None
     client = http or MarketHttp()
     quotes: list[Quote] = []
@@ -170,13 +170,18 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
         markets: list[dict] = []
         for _ in range(pages):
             params = {"status": "open", "limit": str(page_size), "mve_filter": "exclude"}
+            if close_window is not None:
+                # Kalshi's close-time filters cannot be combined with status=open.
+                # Filter active markets locally after applying the time window.
+                params.pop("status")
+                params.update(min_close_ts=str(close_window[0]), max_close_ts=str(close_window[1]))
             if cursor:
                 params["cursor"] = cursor
             payload = client.get_json(f"{root}/markets", params=params)
             if not isinstance(payload, dict):
                 break
             batch = payload.get("markets") or []
-            markets.extend(batch)
+            markets.extend(item for item in batch if item.get("status") in {"active", "open"})
             cursor = payload.get("cursor") or ""
             if not cursor or not batch:
                 break
