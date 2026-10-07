@@ -434,3 +434,9 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .more-trades { background: transparent; border: 0; border-radius: 0; font-size: .8rem; font-weight: 500; color: var(--dim); min-height: 48px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 5px; }
 .more-trades:hover { background: transparent; color: var(--cream); text-decoration-color: var(--brass); }
 .foot .expected-note { margin: 0; }
+
+.trade-reveal .trade-story { gap: 10px; }
+.trade-story p { margin: 0; }
+.trade-story .trade-story-pick { color: var(--cream); }
+.trade-story p.good { color: var(--green); }
+.trade-story p.bad { color: var(--red); }

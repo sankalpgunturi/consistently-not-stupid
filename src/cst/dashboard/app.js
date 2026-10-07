@@ -203,20 +203,35 @@ function renderTrades(rows, positions = []) {
     const profitIfWin = position?.profit_if_win;
     const profit = exit ? exit.pnl : profitIfWin;
     const tradeId = entry?.id || position?.id || exit.id;
-    const review = state?.trade_reviews?.[entry?.id];
-    const reviewText = review?.summary || "No model review recorded for this entry.";
     const expanded = expandedTrades.has(tradeId);
     const detailId = `detail-${tradeId}`;
     const rawUrl = state?.market_links?.[`${row.venue}:${row.market_id}:${row.side}`] || position?.url;
     let marketUrl = '';
     try { const url = new URL(rawUrl); if (url.protocol === 'https:' && (url.hostname === 'kalshi.com' || url.hostname.endsWith('.kalshi.com'))) marketUrl = url.href; } catch {}
-    const detailHtml = `
-      <div class="trade-detail-body">
-
-        <div><b>Entry</b><p>${esc(entry?.reason || "Entry explanation unavailable.")}</p></div>
-        <div><b>${exit ? 'Outcome' : 'At settlement'}</b><p>${esc(exit?.reason || `${cents(position?.cost_basis || 0)} paid → ${cents(position?.shares || 0)} returned if won; zero if lost.`)}</p></div>
-        <div><b>${esc(review?.context || 'Review')}</b><p>${esc(reviewText)}</p>${review?.ts ? `<small>${esc(new Date(review.ts).toLocaleString())}</small>` : ''}</div>
-      </div>`;
+    const pick = String(row.side || exit?.side || '').toUpperCase();
+    const winProfit = entry ? entry.shares - (entry.shares * entry.price + entry.fee) : null;
+    const paidValue = entry ? entry.shares * entry.price + entry.fee : position?.cost_basis;
+    const returnValue = exit ? Math.max(0, exit.shares * exit.price - exit.fee) : null;
+    const entryStory = entry
+      ? `Bought at ${time(entry.ts)} when our pick was priced at ${probability}. Paid ${paid} including fees.`
+      : 'The original purchase details are unavailable.';
+    const why = Number.isFinite(winProfit) && winProfit > 0
+      ? `We entered for the high quoted probability and ${cents(winProfit)} profit if our pick won.` : '';
+    let outcomeStory;
+    if (!exit) {
+      outcomeStory = `Waiting for the official result.${closeAt ? ` Market closes at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${cents(profitIfWin || 0)}. Lose: −${cents(paidValue || 0)}.`;
+    } else if (exit.action === 'settle') {
+      const winner = exit.won ? pick : pick === 'YES' ? 'NO' : 'YES';
+      outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${cents(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
+    } else {
+      outcomeStory = `Sold before settlement at ${time(exit.ts)}. Received ${cents(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
+    }
+    const detailHtml = `<div class="trade-detail-body trade-story">
+      <p class="trade-story-pick">We picked <strong>${esc(pick || 'an unrecorded side')}</strong>.</p>
+      <p>${esc(entryStory)}</p>
+      ${why ? `<p>${esc(why)}</p>` : ''}
+      <p class="${exit ? exit.pnl < 0 ? 'bad' : 'good' : ''}">${esc(outcomeStory)}</p>
+    </div>`;
     return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}" tabindex="0" aria-expanded="${expanded}" aria-controls="${esc(detailId)}" aria-label="${esc(row.title)}: trade details">
       <td class="title" data-label="Trade">${marketUrl ? `<a class="trade-link" href="${esc(marketUrl)}" target="_blank" rel="noopener noreferrer">${esc(row.title)}</a>` : esc(row.title)}</td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
