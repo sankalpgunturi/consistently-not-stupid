@@ -236,6 +236,7 @@ class Position:
         return {
             "id": self.id,
             "venue": self.venue,
+            "market_id": self.market_id,
             "title": self.title,
             "outcome": self.outcome,
             "side": self.side,

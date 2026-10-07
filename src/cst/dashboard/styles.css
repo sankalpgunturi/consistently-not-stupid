@@ -387,3 +387,29 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
   .strategy-grid { grid-template-columns: 1fr; gap: 16px; }
 }
 #more-trades.hidden { display: none; }
+
+/* Compact trade list with generous disclosure targets. */
+.more-trades { width: 100%; min-height: 48px; height: 48px; border-radius: 12px; background: rgba(243,234,215,.025); display: flex; align-items: center; justify-content: center; }
+.more-trades svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.trade-row { cursor: pointer; }
+.trade-row:hover { background: rgba(243,234,215,.045); }
+.trade-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.trade-toggle span { color: var(--muted); }
+.trade-toggle:focus-visible { outline: 2px solid var(--brass); outline-offset: 4px; }
+.trade-history .trade-detail.hidden { display: none; }
+.trade-detail-body { display: grid; gap: 18px; padding: 8px; font-size: .85rem; line-height: 1.65; }
+.trade-detail-body b { font-weight: 500; color: var(--cream); }
+.trade-detail-body p { margin: 5px 0 0; color: var(--dim); }
+.trade-detail-body small { color: var(--muted); }
+.knobs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.knob { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.knob .mini { flex-shrink: 0; }
+.settings .controls-row { justify-content: flex-end; margin-top: 24px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .knobs { grid-template-columns: 1fr; }
+  .trade-history .trade-detail { display: block; }
+  .trade-history .trade-detail td::before { display: none; }
+  .trade-detail-body { padding: 0; }
+  .top-meta { flex-wrap: wrap; }
+}

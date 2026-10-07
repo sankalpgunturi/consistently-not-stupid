@@ -91,6 +91,8 @@ class Store:
                 ts TEXT, payload TEXT
             );
             CREATE TABLE IF NOT EXISTS daily_reviews (day INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS retro_cycle ON retrospectives(json_extract(payload, '$.cycle'));
+            CREATE INDEX IF NOT EXISTS bought_decisions ON decisions(cycle) WHERE json_extract(payload, '$.action') = 'bought';
             CREATE TABLE IF NOT EXISTS scans (
                 cycle INTEGER PRIMARY KEY, ts TEXT NOT NULL, payload TEXT NOT NULL
             );
@@ -889,6 +891,36 @@ class Store:
                 "SELECT ts, payload FROM retrospectives WHERE json_extract(payload, '$.source') = 'openai' ORDER BY id DESC LIMIT 1"
             ).fetchone()
         return dict(json.loads(row["payload"]), ts=row["ts"]) if row else None
+
+    def trade_reviews(self) -> dict:
+        """Link only recorded buys to their own scan review, never the latest review."""
+        with self.lock:
+            rows = self.conn.execute("""
+                SELECT d.payload AS decision, r.payload AS review, r.ts
+                FROM decisions d LEFT JOIN retrospectives r
+                  ON json_extract(r.payload, '$.cycle') = d.cycle
+                WHERE json_extract(d.payload, '$.action') = 'bought'
+                ORDER BY d.cycle, d.id
+            """).fetchall()
+            trades = self.conn.execute("SELECT * FROM trades WHERE action='buy' ORDER BY ts,rowid").fetchall()
+        by_key, entries, result = {}, {}, {}
+        for row in rows:
+            key = json.loads(row['decision']).get('key')
+            by_key.setdefault(key, []).append(row)
+        for trade in trades:
+            key = f"{trade['venue']}:{trade['market_id']}:{trade['side']}"
+            entries.setdefault(key, []).append(trade)
+        for key, buys in entries.items():
+            reviews = by_key.get(key, [])
+            if len(buys) != len(reviews):
+                continue  # Imported or incomplete history must not borrow a review.
+            for trade, row in zip(buys, reviews):
+                review = json.loads(row['review']) if row['review'] else {}
+                if review.get('source') == 'openai':
+                    result[trade['id']] = {'summary': review.get('summary'),
+                        'concerns': review.get('concerns', []), 'ts': row['ts'],
+                        'context': 'Entry scan review · before execution'}
+        return result
 
     def paper_started_at(self) -> str:
         with self.lock:

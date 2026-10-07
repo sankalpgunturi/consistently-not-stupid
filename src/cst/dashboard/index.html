@@ -16,6 +16,7 @@
       <h1>Consistently Not Stupid</h1>
     </div>
     <div class="top-meta">
+      <button type="button" id="live" class="btn ghost" disabled title="Live order execution is not implemented">Switch to live trading</button>
       <button type="button" id="pause" class="btn ghost">Pause buys</button>
     </div>
   </header>
@@ -37,34 +38,21 @@
       <article class="card">
         <div class="card-head"><h2>Trades</h2></div>
         <div class="table-wrap"><table class="trade-history">
-          <thead><tr><th>Trade</th><th>Pick</th><th>Entry probability</th><th>Paid</th><th>Status</th><th>Net P&amp;L</th><th>Profit if won</th><th>Opened</th><th>Close</th></tr></thead>
+          <thead><tr><th>Trade</th><th>Pick</th><th>Entry probability</th><th>Paid</th><th>Status</th><th>Profit</th><th>Opened</th><th>Close</th></tr></thead>
           <tbody id="trades"></tbody>
         </table></div>
         <p class="empty" id="trades-empty">None</p>
-        <button type="button" class="more-trades hidden" id="more-trades" aria-label="Show 5 more trades" title="Show more trades"><span aria-hidden="true">⌄</span></button>
+        <button type="button" class="more-trades hidden" id="more-trades" aria-label="Show 5 more trades" title="Show more trades"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
       </article>
     </section>
 
-    <section class="card strategy-card">
-      <h2>Strategy</h2>
-      <dl id="strategy" class="strategy-grid"></dl>
-    </section>
-    <details class="card disclosure">
-      <summary>Activity</summary>
-      <p id="activity" class="prose"></p>
-      <details class="inner-disclosure"><summary>Latest review</summary>
-        <p id="review-time" class="muted"></p>
-        <p id="review-summary" class="prose"></p>
-      </details>
-    </details>
-
     <details class="card disclosure settings">
-      <summary>Settings</summary>
+      <summary>Strategy &amp; settings</summary>
+      <dl id="strategy" class="strategy-grid"></dl>
       <div class="controls-row">
         <button type="button" id="scan" class="btn">Scan now</button>
       </div>
       <div class="knobs" id="knobs"></div>
-      <button type="button" id="reset" class="text-btn reset-control">Reset paper account</button>
     </details>
 
   </main>

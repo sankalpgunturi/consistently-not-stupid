@@ -30,6 +30,7 @@ let state = null;
 let lastStamp = "";
 let pendingCommand = null;
 let tradeLimit = 5;
+const expandedTrades = new Set();
 
 function render(next) {
   state = next;
@@ -53,6 +54,7 @@ function render(next) {
     tape: next.tape,
     positions: next.positions,
     trades: next.trades,
+    trade_reviews: next.trade_reviews,
     realized_curve: next.realized_curve,
     focus: next.focus,
     retro: next.latest_model_review,
@@ -97,14 +99,6 @@ function render(next) {
   $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
     book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
   renderStrategy(next);
-  $("activity").textContent = next.status === "stale" ? "Updates paused." :
-    !next.cycle?.number ? "Starting the scanner." :
-    !counts.markets_read ? "No contracts in the outcome window on the latest check." :
-    counts.bought ? `Bought ${counts.bought} trade${counts.bought === 1 ? "" : "s"} on the latest check.` :
-    `${counts.markets_read} markets checked. ${counts.favorites || 0} at the probability threshold; no new buys.`;
-  const review = next.latest_model_review;
-  $("review-time").textContent = review?.ts ? new Date(review.ts).toLocaleString() : "";
-  $("review-summary").textContent = review?.summary || (next.llm?.enabled ? "Review pending. Paper trading continues." : "Model review is not configured.");
 
   drawProfit(next.realized_curve || []);
   renderKnobs(next.params || []);
@@ -127,8 +121,8 @@ function renderStrategy(next) {
 function renderKnobs(rows) {
   $("knobs").innerHTML = rows.map((row) => `
     <div class="knob">
-      <b>${esc(row.label)}</b>
-      <em>${esc(formatKnob(row))}</em>
+      <div><b>${esc(row.label)}</b>
+      <em>${esc(formatKnob(row))}</em></div>
 
       ${row.adjustable === false ? "" : `<button type="button" class="mini" data-tighten="${esc(row.key)}">Tighten</button>`}
     </div>
@@ -168,10 +162,11 @@ function renderTrades(rows, positions = []) {
   }
   // Positions are authoritative, including entries older than the recent tape.
   const openStories = positions.map(position => ({entry: {
+    ...(pending.get(`${position.venue}:${position.market_id}`)?.entry || {}),
     venue: position.venue, market_id: position.market_id, title: position.title,
     side: position.side, shares: position.shares, price: position.entry_price,
     fee: position.cost_basis - position.shares * position.entry_price,
-    ts: position.opened_at,
+    ts: position.opened_at, reason: position.reason,
   }, exit: null, position}));
   const all = [...openStories, ...stories.filter(story => story.exit).reverse()];
   const visible = all.slice(0, tradeLimit);
@@ -190,17 +185,28 @@ function renderTrades(rows, positions = []) {
     const closeAt = exit?.ts || position?.end_time;
     const closeLabel = exit ? "Closed" : "Expected close";
     const profitIfWin = position?.profit_if_win;
-    return `<tr class="${outcomeClass}">
-      <td class="title" data-label="Trade">${esc(row.title)}</td>
+    const profit = exit ? exit.pnl : profitIfWin;
+    const tradeId = entry?.id || position?.id || exit.id;
+    const expanded = expandedTrades.has(tradeId);
+    const review = state?.trade_reviews?.[entry?.id];
+    const detailId = `detail-${tradeId}`;
+    const reviewText = review?.summary || "No model review recorded for this entry.";
+    return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}">
+      <td class="title" data-label="Trade"><button class="trade-toggle" data-trade-toggle="${esc(tradeId)}" aria-expanded="${expanded}" aria-controls="${esc(detailId)}">${esc(row.title)}<span aria-hidden="true">${expanded ? "−" : "+"}</span></button></td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
       <td class="trade-result" data-label="Status" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
-      <td data-label="Net P&amp;L" class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
-      <td class="num" data-label="Profit if won" title="Net profit after entry fees at official settlement">${!exit && Number.isFinite(profitIfWin) ? esc(`${profitIfWin > 0 ? "+" : profitIfWin < 0 ? "−" : ""}${cents(Math.abs(profitIfWin))}`) : "—"}</td>
+      <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<span class="close-estimate">Expected</span>' : ''}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
       <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<span class="close-estimate">Expected</span>' : ''}</td>
-    </tr>`;
+    </tr><tr id="${esc(detailId)}" class="trade-detail ${expanded ? '' : 'hidden'}"><td colspan="8">
+      <div class="trade-detail-body">
+        <div><b>Entry</b><p>${esc(entry?.reason || "Entry explanation unavailable.")}</p></div>
+        <div><b>${exit ? 'Outcome' : 'At settlement'}</b><p>${esc(exit?.reason || `${cents(position?.cost_basis || 0)} paid → ${cents(position?.shares || 0)} returned if won; zero if lost.`)}</p></div>
+        <div><b>${esc(review?.context || 'Review')}</b><p>${esc(reviewText)}</p>${review?.ts ? `<small>${esc(new Date(review.ts).toLocaleString())}</small>` : ''}</div>
+      </div>
+    </td></tr>`;
   }).join("");
 }
 
@@ -265,6 +271,15 @@ async function post(url, body) {
   return payload;
 }
 
+$("trades").addEventListener("click", event => {
+  const row = event.target.closest(".trade-row");
+  if (!row) return;
+  const id = row.dataset.trade;
+  if (expandedTrades.has(id)) expandedTrades.delete(id); else expandedTrades.add(id);
+  renderTrades(state?.trades || [], state?.positions || []);
+  document.querySelector(`[data-trade-toggle="${CSS.escape(id)}"]`)?.focus({preventScroll: true});
+});
+
 $("more-trades").addEventListener("click", () => {
   tradeLimit += 5;
   renderTrades(state?.trades || [], state?.positions || []);
@@ -283,11 +298,6 @@ $("scan").addEventListener("click", async () => {
 
 $("pause").addEventListener("click", () => {
   post("/api/pause", { paused: !state?.operator_pause });
-});
-
-$("reset").addEventListener("click", async () => {
-  if (!confirm("Reset the paper book to the starting cash? The tape, the open trades, and the audit will be cleared. The settled record is kept.")) return;
-  await post("/api/reset");
 });
 
 document.body.addEventListener("click", async (event) => {
