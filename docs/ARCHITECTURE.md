@@ -4,14 +4,14 @@ A paper account of $1,000. One process reads public books, decides, and writes a
 
 ## Loop
 
-Every `scan_interval_seconds` (default 10 minutes) `Engine.run_cycle`:
+After each `scan_interval_seconds` delay (default 60 seconds), `Engine.run_cycle`:
 
 1. Read Kalshi public markets (first pages, multivariate combos excluded).
 2. Remember which quotes stayed inside the probability band. A favorite has to be stable for `min_stable_scans`.
-3. `strategy.evaluate` builds proposals. A buy exists only when the fee, horizon, size cap, correlation, and the settled record all pass. The confirming price is the Wilson lower bound of that ask's bucket. The bucket counts Kalshi settled markets whose latest trade at least `min_hours_to_expiry` before close landed there, plus this desk's own settlements. The prints are kept, so a tighter horizon is scored from the same trades when those trades reach the new cutoff. A ticker we have settled is counted from that settlement only. It has to sit above the all-in cost by `min_edge`, and the bucket needs `min_sample` observations. A high quote with no record stays in cash. Before each fill the scan re-reads the knobs and the book, and runs the admission rules again, because a tighten can land while the book is still being fetched.
+3. Record the first structurally eligible quote per event and resolve pending research observations. `strategy.evaluate` builds proposals only when fee, expected-outcome timing, size, correlation and evidence checks pass. The confirming probability is the Wilson lower bound from resolved prospective observations in the active entry window and price bucket. It must exceed ask plus fee by `min_edge`, with at least `min_sample` observations. Research records are not fills, and legacy two-hour history is kept separate. A high quote with insufficient evidence stays in cash. Before each fill, re-read the knobs and book and run admission again.
 4. If `CST_OPENAI_API_KEY` is set, one `POST /v1/decisions` call (`gpt-6-luna`) may drop a proposed clip. The chat note may also name drops. Unknown ids are ignored.
 5. Before a paper buy, `depth.py` reads the Kalshi orderbook. The other side's bids are the ask. Short size, a moved touch, or a failed read skips the fill.
-6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. A faster loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and stops a clip whose bid fell `stop_gap` under the entry, if that bid has size.
+6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. The mark loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and stops a clip whose bid fell `stop_gap` under the entry, if that bid has size.
 7. The governor may tighten one knob. It writes an audit row.
 
 `cst simulate` is a separate model with a known true chance. It does not touch the book. `cst bench` times step 3, and step 4 when a key is set, and also does not touch the book.
@@ -41,7 +41,7 @@ The page can pause new buys, block a market key, close a paper clip, and tighten
 
 ## What this is not
 
-No matching engine, no colocation, no second strategy, no per-market model call, no model-originated buys, no live signing. Inventory caps, the pause, executable size, the fee, and a faster mark loop than the entry loop are the pieces kept from high-frequency practice. The decision clock stays at 10 minutes.
+No matching engine, no colocation, no second strategy, no per-market model call, no model-originated buys, no live signing. Inventory caps, the pause, executable size, fees and refreshed marks constrain paper execution. The ten-minute limit applies to the expected outcome; scans run about once a minute plus processing time.
 
 ## Ten-minute paper strategy (October 7 clarification)
 
