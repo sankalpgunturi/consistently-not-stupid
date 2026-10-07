@@ -29,6 +29,7 @@ const countdown = (iso) => {
 let state = null;
 let lastStamp = "";
 let pendingCommand = null;
+let tradeLimit = 5;
 
 function render(next) {
   state = next;
@@ -54,7 +55,7 @@ function render(next) {
     trades: next.trades,
     realized_curve: next.realized_curve,
     focus: next.focus,
-    retro: next.retrospective,
+    retro: next.latest_model_review,
     cycle: next.cycle,
     params: next.params,
     audit: next.audit,
@@ -76,12 +77,6 @@ function render(next) {
     `<div class="stat ${color}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`
   ).join("");
 
-  const benchmark = next.benchmark || {};
-  $("benchmark").textContent = `S&P 500 equivalent: ${benchmark.value == null ? "—" : money(benchmark.value)}`;
-  $("benchmark-date").textContent = benchmark.as_of ? `As of ${new Date(benchmark.as_of).toLocaleDateString([], {month:"short", day:"numeric"})} close${benchmark.error ? " · Update unavailable" : ""}` : "";
-  $("benchmark").title = benchmark.basis || "Adjusted daily close";
-  renderEvidence(next);
-  renderResearch(next.research || {});
   const old = document.querySelector(".banner");
   if (old) old.remove();
   const messages = [];
@@ -101,114 +96,32 @@ function render(next) {
   const counts = next.counts || {};
   $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
     book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
-  const steps = [
-    [counts.markets_read, "markets read"],
-    [counts.favorites, "favorites"],
-    [counts.fee_ok, "after fees"],
-    [counts.stable, "stable"],
-    [counts.confirmed, "entry checks passed"],
-    [counts.bought, "filled"],
-  ];
-  $("funnel").innerHTML = steps.map(([value, label]) =>
-    `<div class="step"><b>${esc(value ?? "—")}</b><span>${esc(label)}</span></div>`
-  ).join("");
-
-  const focus = next.focus;
-  $("focus-title").textContent = focus ? focus.title : "Waiting for the first scan";
-  $("focus-detail").textContent = focus
-    ? `${focus.venue ? focus.venue + " · " : ""}${focus.outcome ? focus.outcome + ". " : ""}${focus.detail || ""}`
-    : "The desk is about to read Kalshi.";
+  renderStrategy(next);
+  $("activity").textContent = next.status === "stale" ? "Updates paused." :
+    !next.cycle?.number ? "Starting the scanner." :
+    !counts.markets_read ? "No contracts in the outcome window on the latest check." :
+    counts.bought ? `Bought ${counts.bought} trade${counts.bought === 1 ? "" : "s"} on the latest check.` :
+    `${counts.markets_read} markets checked. ${counts.favorites || 0} at the probability threshold; no new buys.`;
+  const review = next.latest_model_review;
+  $("review-time").textContent = review?.ts ? new Date(review.ts).toLocaleString() : "";
+  $("review-summary").textContent = review?.summary || (next.llm?.enabled ? "Review pending. Paper trading continues." : "Model review is not configured.");
 
   drawProfit(next.realized_curve || []);
-  renderTape(next.tape || [], next.cycle || {});
-  renderRetro(next.retrospective, next.llm || {});
   renderKnobs(next.params || []);
   renderTrades(next.trades || [], next.positions || []);
-  renderAudit(next.audit || []);
 }
 
-function renderEvidence(next) {
-  const evidence = next.evidence || {};
-  const book = next.book || {};
-  const cells = [
-    [money(book.cash), "cash"],
-    [money(book.deployed), "invested"],
-    [money(book.realized), "realized P&L"],
-    [money(book.unrealized), "unrealized P&L"],
-    [money(book.fees_paid), "fees"],
-    [`${Math.round((evidence.drawdown || 0) * 1000) / 10}%`, "drawdown"],
+function renderStrategy(next) {
+  const params = Object.fromEntries((next.params || []).map(row => [row.key, row.value]));
+  const rows = [
+    ["Quoted probability", `${Math.round((params.min_probability ?? .90) * 100)}% or higher`],
+    ["Outcome expected", `Within ${params.entry_window_minutes ?? 10} minutes`],
+    ["Bet size", "1 contract · spread across distinct risks"],
+    ["Exit", "Hold to the official result"],
+    ["Capital", `${money(next.book?.start ?? 1000)} · reinvest proceeds · no top-ups`],
+    ["Daily target", "Break even or better after fees · review losses"],
   ];
-  $("evidence").innerHTML = cells.map(([value, label]) =>
-    `<div><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`
-  ).join("");
-}
-
-function renderTape(rows, cycle) {
-  const drafts = new Map();
-  let focused = null;
-  let caret = null;
-  document.querySelectorAll("[data-note]").forEach((el) => {
-    drafts.set(el.dataset.note, el.value);
-    if (document.activeElement === el) {
-      focused = el.dataset.note;
-      caret = el.selectionStart;
-    }
-  });
-  const meta = [];
-  if (cycle.number) meta.push(`Scan ${cycle.number}`);
-  if (cycle.duration_seconds != null) meta.push(`${cycle.duration_seconds}s`);
-  if (cycle.finished_at) meta.push(new Date(cycle.finished_at).toLocaleTimeString());
-  $("scan-meta").textContent = meta.join(" · ") || "—";
-  $("tape-empty").classList.toggle("hidden", rows.length > 0);
-  $("tape").innerHTML = rows.slice(0, 40).map((row) => `
-    <li>
-      <span class="tag ${esc(row.action)}">${esc(row.action)}${row.group_count > 1 ? ` ×${row.group_count}` : ""}</span>
-      <div>
-        <span class="venue">${esc(row.venue)}</span>
-        <span class="title">${esc(row.title)}</span>
-        <span class="sub">${esc(row.outcome || "")}${row.price != null ? ` · ${Math.round(row.price * 1000) / 10}¢` : ""}</span>
-        <span class="sub">${esc(row.detail || "")}</span>
-        ${rowActions(row)}
-      </div>
-    </li>
-  `).join("");
-  document.querySelectorAll("[data-note]").forEach((el) => {
-    if (drafts.has(el.dataset.note)) el.value = drafts.get(el.dataset.note);
-  });
-  if (focused) {
-    const again = document.querySelector(`[data-note="${CSS.escape(focused)}"]`);
-    if (again) {
-      again.focus();
-      const pos = caret == null ? again.value.length : caret;
-      again.setSelectionRange(pos, pos);
-    }
-  }
-}
-
-function rowActions(row) {
-  const bits = [];
-  if (row.key && !(row.group_count > 1)) {
-    bits.push(`<button type="button" class="mini" data-block="${esc(row.key)}">Block</button>`);
-  }
-  if (!bits.length) return "";
-  return `<div class="row-actions">${bits.join("")}</div>`;
-}
-
-function renderRetro(retro, llm) {
-  $("retro-source").textContent = "";
-  $("retro").textContent = retro?.summary || "The note appears after the first pass.";
-  const notes = [...(retro?.notes || []), ...(retro?.concerns || [])];
-  if (retro?.model_error) notes.push(retro.model_error);
-  $("retro-notes").innerHTML = notes.map((note) => `<li>${esc(note)}</li>`).join("");
-}
-
-function renderResearch(research) {
-  $("research-counts").textContent = `${research.scans_recorded || 0} scans archived · ${research.observations || 0} quote observations · ${research.distinct_contract_sides || 0} distinct contract sides`;
-  const near = research.near_resolution;
-  if (near) $("research-counts").textContent += ` · ${near.observed_events} near-outcome events observed, ${near.resolved_events} resolved`;
-  const rows = research.calibration || [];
-  $("calibration").innerHTML = rows.map(row => `<tr><td>${esc(row.bucket)}</td><td>${esc(row.samples)}</td><td>${esc(row.wins)}</td><td>${esc((row.lower_bound * 100).toFixed(1))}%</td></tr>`).join("");
-  $("research-note").textContent = "";
+  $("strategy").innerHTML = rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
 }
 
 function renderKnobs(rows) {
@@ -238,13 +151,6 @@ function formatKnob(row) {
   return String(row.value);
 }
 
-function renderAudit(rows) {
-  $("audit-empty").classList.toggle("hidden", rows.length > 0);
-  $("audit").innerHTML = rows.map((row) =>
-    `<li>${esc(new Date(row.ts).toLocaleString())} · ${esc(row.actor)} ${esc(row.action)} · ${esc(row.reason)}</li>`
-  ).join("");
-}
-
 function renderTrades(rows, positions = []) {
   const stories = [];
   const pending = new Map();
@@ -267,7 +173,9 @@ function renderTrades(rows, positions = []) {
     fee: position.cost_basis - position.shares * position.entry_price,
     ts: position.opened_at,
   }, exit: null}));
-  const visible = [...openStories, ...stories.filter(story => story.exit).reverse().slice(0, 8)];
+  const all = [...openStories, ...stories.filter(story => story.exit).reverse()];
+  const visible = all.slice(0, tradeLimit);
+  $("more-trades").classList.toggle("hidden", visible.length >= all.length);
   const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
   const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
   $("trades-empty").classList.toggle("hidden", visible.length > 0);
@@ -350,6 +258,11 @@ async function post(url, body) {
   if (payload) render(payload);
   return payload;
 }
+
+$("more-trades").addEventListener("click", () => {
+  tradeLimit += 5;
+  renderTrades(state?.trades || [], state?.positions || []);
+});
 
 $("scan").addEventListener("click", async () => {
   $("scan").disabled = true;

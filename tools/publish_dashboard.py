@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FIELDS = {'status', 'operator_pause', 'paper_age_days', 'evidence', 'book',
     'daily', 'last_24h', 'benchmark', 'counts', 'tape', 'positions', 'trades',
     'realized_curve', 'focus', 'retrospective', 'cycle', 'params', 'research',
-    'next_scan_at', 'errors', 'llm'}
+    'next_scan_at', 'errors', 'llm', 'latest_model_review'}
 
 
 def public_snapshot(state):

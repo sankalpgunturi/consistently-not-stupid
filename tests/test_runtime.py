@@ -307,3 +307,12 @@ def test_nearest_discovery_respects_budget_smaller_than_window_count():
     fetch_kalshi('https://example.invalid',2,200,http=Http(),
         close_windows=[(100,200),(200,300),(300,400),None],prioritize_nearest=True)
     assert len(calls)==2
+
+
+def test_latest_model_review_survives_routine_scans(tmp_path):
+    store = Store(tmp_path / 'book.sqlite', StrategyParams(), 1000)
+    store.add_retro({'source': 'openai', 'summary': 'Review of the actual trades.'})
+    for _ in range(10):
+        store.add_retro({'source': 'governor', 'summary': 'No new buys.'})
+    assert store.latest_model_review()['summary'] == 'Review of the actual trades.'
+    assert store.retros(1)[0]['source'] == 'governor'

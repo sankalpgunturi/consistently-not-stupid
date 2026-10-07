@@ -373,3 +373,13 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
   .table-wrap { min-width: 0; }
   .balance-chart .card-head { flex-wrap: wrap; gap: 8px; }
 }
+
+.strategy-card { margin-top: 16px; }
+.strategy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; margin: 20px 0 0; }
+.strategy-grid dt { color: var(--muted); font-size: .78rem; margin-bottom: 4px; }
+.strategy-grid dd { margin: 0; font-size: .9rem; }
+#more-trades { margin-top: 14px; }
+@media (max-width: 600px) {
+  .strategy-grid { grid-template-columns: 1fr; gap: 16px; }
+}
+#more-trades.hidden { display: none; }

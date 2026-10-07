@@ -883,6 +883,13 @@ class Store:
             out.append(item)
         return out
 
+    def latest_model_review(self) -> dict | None:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT ts, payload FROM retrospectives WHERE json_extract(payload, '$.source') = 'openai' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        return dict(json.loads(row["payload"]), ts=row["ts"]) if row else None
+
     def paper_started_at(self) -> str:
         with self.lock:
             return str(self._get("paper_started_at") or "")

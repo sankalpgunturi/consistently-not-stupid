@@ -41,35 +41,20 @@
           <tbody id="trades"></tbody>
         </table></div>
         <p class="empty" id="trades-empty">None</p>
+        <button type="button" class="btn hidden" id="more-trades">Read more</button>
       </article>
     </section>
 
+    <section class="card strategy-card">
+      <h2>Strategy</h2>
+      <dl id="strategy" class="strategy-grid"></dl>
+    </section>
     <details class="card disclosure">
-      <summary>Details</summary>
-      <p class="muted" id="benchmark">S&amp;P 500 equivalent: —</p>
-      <small class="muted" id="benchmark-date"></small>
-      <section class="evidence" id="evidence" aria-label="Account details"></section>
-      <div class="card-head section-heading"><h2>Latest scan</h2><p class="muted" id="scan-meta">—</p></div>
-      <section class="funnel" id="funnel"></section>
-
-      <details class="inner-disclosure"><summary>Decisions</summary>
-        <div id="focus"><h3 id="focus-title">Waiting for scan</h3><p id="focus-detail"></p></div>
-        <ol class="tape" id="tape"></ol><p class="empty" id="tape-empty">No decisions yet.</p>
-      </details>
-      <details class="inner-disclosure"><summary>Review</summary>
-      <div class="card-head section-heading"><h2>Review</h2><p class="muted" id="retro-source"></p></div>
-      <p id="retro" class="prose">Waiting for scan.</p><ul id="retro-notes" class="notes"></ul>
-      </details>
-      <details class="inner-disclosure"><summary>Research</summary>
-        <p class="muted" id="research-counts"></p>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Price bucket</th><th>Samples</th><th>Wins</th><th>Lower bound</th></tr></thead>
-          <tbody id="calibration"></tbody>
-        </table></div>
-        <p id="research-note" class="muted"></p>
-      </details>
-      <details class="inner-disclosure"><summary>Change log</summary>
-        <ul class="notes" id="audit"></ul><p class="empty" id="audit-empty">No changes.</p>
+      <summary>Activity</summary>
+      <p id="activity" class="prose"></p>
+      <details class="inner-disclosure"><summary>Latest review</summary>
+        <p id="review-time" class="muted"></p>
+        <p id="review-summary" class="prose"></p>
       </details>
     </details>
 
@@ -83,7 +68,7 @@
     </details>
 
   </main>
-  <footer class="foot"><p>Paper trading</p></footer>
+  <footer class="foot"><p>Kalshi paper trading</p></footer>
   <script src="/static/app.js"></script>
 </body>
 </html>
