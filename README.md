@@ -1,4 +1,4 @@
-# Consistently not Stupid
+# Consistently Not Stupid
 
 > It is remarkable how much long-term advantage people like us have gotten by trying to be consistently not stupid, instead of trying to be very intelligent.
 >

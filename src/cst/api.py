@@ -52,7 +52,7 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
         yield
         engine.stop()
 
-    app = FastAPI(title="Consistently not Stupid", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="Consistently Not Stupid", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.engine = engine
     if DASHBOARD.exists():
         app.mount("/static", StaticFiles(directory=DASHBOARD), name="static")
@@ -76,7 +76,7 @@ def create_app(engine: Engine, start_loop: bool = True) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "mode": "paper", "live": "unavailable", "name": "Consistently not Stupid"}
+        return {"ok": True, "mode": "paper", "live": "unavailable", "name": "Consistently Not Stupid"}
 
     @app.get("/api/state")
     def state():

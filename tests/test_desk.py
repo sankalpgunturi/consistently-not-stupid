@@ -416,7 +416,7 @@ def test_dashboard_and_health(tmp_path):
         assert health.status_code == 200
         page = client.get("/")
         assert page.status_code == 200
-        assert "Consistently not Stupid" in page.text
+        assert "Consistently Not Stupid" in page.text
         assert "instead of trying to be very intelligent" in page.text
         assert "Scan now" in page.text
         assert "Live unavailable" in page.text

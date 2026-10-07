@@ -98,8 +98,8 @@ def _downsample(curve: list[float], points: int = 40) -> list[float]:
 def run_report(seed: int = 7, paths: int = 200, markets: int = 90, bankroll: float = 1000) -> dict:
     specs = (
         ("naive", "fair", "Buy every 90% quote", "The quote is the true chance"),
-        ("common", "fair", "Consistently not stupid", "The quote is the true chance"),
-        ("common", "dislocated", "Consistently not stupid", "Some second venues are a few cents higher"),
+        ("common", "fair", "Consistently Not Stupid", "The quote is the true chance"),
+        ("common", "dislocated", "Consistently Not Stupid", "Some second venues are a few cents higher"),
     )
     books = []
     curves = {}

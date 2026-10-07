@@ -392,7 +392,7 @@ class Engine:
             })
         retros = self.store.retros(6)
         return {
-            "name": "Consistently not Stupid",
+            "name": "Consistently Not Stupid",
             "mode": "paper",
             "live": "unavailable",
             "csrf": self.store.csrf(),

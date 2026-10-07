@@ -1,4 +1,4 @@
-# Consistently not Stupid
+# Consistently Not Stupid
 
 Paper desk for high-probability Kalshi and Polymarket contracts. The aim is to be consistently not stupid, instead of trying to be very intelligent. Live orders are not implemented. The import package and the `cst` command stay `cst`.
 
