@@ -245,3 +245,11 @@ def test_price_interval_research_retains_both_deadlines(tmp_path):
     assert row['minutes_left']==4
     assert json.loads(row['payload'])['expected_resolution_time']==q.expected_resolution_time.isoformat()
     assert store.cash()==1000 and store.trades()==[]
+
+
+@pytest.mark.parametrize('series',['KXAUDUSD15M','KXUSDCAD15M','KXCRYPTOLEAD15M'])
+def test_additional_verified_interval_series_use_event_cutoff(series):
+    q=make_quote(market_id=series+'-TEST',bid=.81,ask=.84,
+                 end_time=NOW+timedelta(minutes=4),expected_resolution_time=NOW+timedelta(minutes=9))
+    p=make_params(entry_window_minutes=5,min_probability=.8)
+    assert evaluate([q],p,make_book(streaks={q.key:2}),now=NOW).proposals

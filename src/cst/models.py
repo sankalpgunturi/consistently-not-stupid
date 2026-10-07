@@ -57,6 +57,7 @@ class Quote:
             "KXBTC15M", "KXETH15M", "KXSOL15M", "KXXRP15M", "KXDOGE15M",
             "KXBNB15M", "KXNEAR15M", "KXHYPE15M", "KXZEC15M",
             "KXEURUSD15M", "KXGBPUSD15M", "KXUSDJPY15M",
+            "KXAUDUSD15M", "KXUSDCAD15M", "KXCRYPTOLEAD15M",
             "KXPLATINUM15M", "KXPALLADIUM15M",
         }
         return self.end_time if series in price_intervals else self.expected_resolution_time

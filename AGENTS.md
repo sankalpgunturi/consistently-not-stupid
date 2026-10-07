@@ -4,7 +4,7 @@ Paper desk for high-probability Kalshi contracts. The aim is to be consistently 
 
 ## Commands
 
-Production paper engine: `chitti-vps`, `/opt/cst`, systemd units `cst-paper` and `cst-dashboard`. The authoritative ledger is `/opt/cst/data/book.sqlite` on that server. The Mac ledger is an archived migration copy; its launch agents are disabled. Do not restart it. Shared dashboard: https://consistently-not-stupid.sgunturi.workers.dev. See `cloudflare/README.md` for deployment and recovery.
+Production paper engine: `chitti-rc-personal`, `/opt/cst`, systemd units `cst-paper` and `cst-dashboard`. The authoritative ledger is `/opt/cst/data/book.sqlite` on that server. The Mac ledger is an archived migration copy; its launch agents are disabled. Do not restart it. Shared dashboard: https://consistently-not-stupid.sgunturi.workers.dev. See `cloudflare/README.md` for deployment and recovery.
 
 - Tests: `.venv/bin/pytest`
 - Dashboard: `.venv/bin/cst serve` then http://127.0.0.1:8000
