@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit, urlunsplit
 
@@ -182,7 +183,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     return quotes
 
 
-def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int] | None] | None = None, priority_page_size: int | None = None, prioritize_nearest: bool = False) -> tuple[list[Quote], str | None]:
+def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int] | None] | None = None, priority_page_size: int | None = None, prioritize_nearest: bool = False, metadata_cache: dict | None = None) -> tuple[list[Quote], str | None]:
     own = http is None
     client = http or MarketHttp()
     quotes: list[Quote] = []
@@ -228,8 +229,8 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
                 if window_index == 0 and budget and used == budget and cursor:
                     log.warning("Near-term discovery reached its %s-page limit with more markets available.", budget)
         markets = list(unique.values())
-        events = _event_titles(client, root, markets)
-        series, fee_errors = _series_fees(client, root, markets)
+        events = _event_titles(client, root, markets, metadata_cache)
+        series, fee_errors = _series_fees(client, root, markets, metadata_cache)
         for market in markets:
             event = events.get(str(market.get("event_ticker") or ""), {})
             ticker = str(market.get("ticker") or "").split("-")[0]
@@ -244,7 +245,22 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
             client.close()
 
 
-def _series_fees(client: MarketHttp, root: str, markets: list[dict]) -> tuple[dict[str, dict], int]:
+def _metadata(client: MarketHttp, url: str, cache: dict | None):
+    """Reuse discovery metadata for 60 seconds; never cache prices or failures."""
+    now = time.monotonic()
+    if cache is not None:
+        for key in list(cache):
+            if now - cache[key][0] >= 60:
+                del cache[key]
+        if url in cache:
+            return cache[url][1]
+    payload = client.get_json(url)
+    if cache is not None and isinstance(payload, dict) and (payload.get("series") or payload.get("event")):
+        cache[url] = (time.monotonic(), payload)
+    return payload
+
+
+def _series_fees(client: MarketHttp, root: str, markets: list[dict], cache: dict | None = None) -> tuple[dict[str, dict], int]:
     """One metadata read per series with a favorite; never guess an unknown fee."""
     wanted = sorted({str(m.get("ticker") or "").split("-")[0] for m in markets
                      if max(_num(m.get("yes_bid_dollars")) or 0, _num(m.get("no_bid_dollars")) or 0) >= 0.80})
@@ -252,7 +268,7 @@ def _series_fees(client: MarketHttp, root: str, markets: list[dict]) -> tuple[di
     errors = 0
     for ticker in wanted:
         try:
-            payload = client.get_json(f"{root}/series/{ticker}")
+            payload = _metadata(client, f"{root}/series/{ticker}", cache)
             row = payload.get("series") if isinstance(payload, dict) else None
             mult = _num(row.get("fee_multiplier")) if isinstance(row, dict) else None
             if not isinstance(row, dict) or row.get("fee_type") not in {"quadratic", "quadratic_with_maker_fees"} or mult is None or not math.isfinite(mult) or mult < 0:
@@ -264,7 +280,7 @@ def _series_fees(client: MarketHttp, root: str, markets: list[dict]) -> tuple[di
     return found, errors
 
 
-def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[str, dict]:
+def _event_titles(client: MarketHttp, root: str, markets: list[dict], cache: dict | None = None) -> dict[str, dict]:
     """Fetch titles only for events that already show a high bid, capped so a scan stays short."""
     wanted: list[str] = []
     seen = set()
@@ -280,7 +296,7 @@ def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[st
     found: dict[str, dict] = {}
     for event_id in wanted:
         try:
-            payload = client.get_json(f"{root}/events/{event_id}")
+            payload = _metadata(client, f"{root}/events/{event_id}", cache)
         except Exception:
             continue
         event = payload.get("event") if isinstance(payload, dict) else None

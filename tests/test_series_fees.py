@@ -68,3 +68,29 @@ def test_fee_lookup_includes_candidates_below_ninety_percent(side, bid):
     assert len(calls) == 1 and failures == 0
     quote = next(q for q in quotes_from_kalshi_market(row, series=found["KXTEST"]) if q.side == side)
     assert quote.fee_verified
+
+
+def test_discovery_metadata_expires_and_does_not_reuse_failed_refresh(monkeypatch):
+    from cst.venues.kalshi import _metadata
+    now = [0]
+    monkeypatch.setattr('cst.venues.kalshi.time.monotonic', lambda: now[0])
+    cache, calls = {}, []
+
+    class Http:
+        def get_json(self, url):
+            calls.append(url)
+            if len(calls) == 2:
+                raise TimeoutError()
+            return {"series": {"fee_type": "quadratic", "fee_multiplier": len(calls)}}
+
+    http = Http()
+    url = 'https://example.invalid/series/TEST'
+    assert _metadata(http, url, cache)['series']['fee_multiplier'] == 1
+    now[0] = 59
+    assert _metadata(http, url, cache)['series']['fee_multiplier'] == 1
+    assert len(calls) == 1
+    now[0] = 60
+    with pytest.raises(TimeoutError):
+        _metadata(http, url, cache)
+    assert url not in cache
+    assert _metadata(http, url, cache)['series']['fee_multiplier'] == 3
