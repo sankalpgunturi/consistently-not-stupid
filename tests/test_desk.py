@@ -860,7 +860,7 @@ def test_a_tighten_during_the_scan_drops_the_fill(tmp_path):
     assert state["counts"]["bought"] == 0
     assert state["book"]["cash"] == 1000
     assert state["positions"] == []
-    assert any(row["reason_code"] == "tightened" for row in state["tape"])
+    assert any(row["reason_code"] == "recheck" for row in state["tape"])
     assert engine.store.params().min_probability == 0.91
 
 
@@ -1112,7 +1112,7 @@ def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
     state = engine.run_cycle()
     assert state["counts"]["bought"] == 0
     assert state["book"]["cash"] == 1000
-    assert any(row["reason_code"] == "tightened" for row in state["tape"])
+    assert any(row["reason_code"] == "recheck" for row in state["tape"])
     assert engine.store.params().min_hours_to_expiry == 3
 
     small = Settings(entry_window_minutes=0, data_dir=str(tmp_path / "small"), min_stable_scans=1, bankroll=125)
@@ -1133,7 +1133,7 @@ def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
     capped = sized.run_cycle()
     assert capped["counts"]["bought"] == 0
     assert capped["book"]["cash"] == 125
-    assert any(row["reason_code"] == "tightened" for row in capped["tape"])
+    assert any(row["reason_code"] == "recheck" for row in capped["tape"])
 
     kept = Settings(entry_window_minutes=0, data_dir=str(tmp_path / "kept"), min_stable_scans=1, bankroll=1000)
     quote = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=20))

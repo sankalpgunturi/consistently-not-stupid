@@ -338,7 +338,7 @@ class Engine:
             if why:
                 decisions.append(Decision(
                     action="skipped",
-                    reason_code="tightened",
+                    reason_code="recheck",
                     title=proposal.quote.title,
                     venue=proposal.quote.venue,
                     outcome=proposal.quote.outcome,

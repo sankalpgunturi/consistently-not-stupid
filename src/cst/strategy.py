@@ -163,38 +163,41 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
 
 
 def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: datetime | None = None, already_bought: int = 0) -> str | None:
-    """A sentence when a mid-scan tighten means this quote no longer clears.
-
-    The scan reads the knobs once. Before the fill, every admission rule runs
-    again on the current knobs and the current book, including the horizon,
-    the fee, the streak and the caps (plus evidence in legacy replay).
-    """
+    """Explain a failed admission recheck using current quotes, rules and book."""
     now = now or datetime.now(timezone.utc)
     if not quote_in_band(quote, params):
-        return "A knob was tightened during this scan, and the quote is no longer at the bar."
-    if _structural(quote, params, now) is not None:
-        return "A knob was tightened during this scan, and the quote no longer clears the structural checks."
+        return (f"Final check: bid {quote.bid:.1%}, ask {quote.ask:.1%}, spread {quote.spread:.1%}; "
+                f"both prices must meet {params.min_probability:.1%} and spread must not exceed {params.max_spread:.1%}.")
+    structural = _structural(quote, params, now)
+    if structural is not None:
+        return f"Final check: {structural[1]}"
     if book.streaks.get(quote.key, 0) < params.min_stable_scans:
-        return "A knob was tightened during this scan, and the quote has not held still long enough."
+        return "Final check: the quote has not met the required number of stable observations."
     if _learned_signal(quote, params, book) is None:
-        return "A knob was tightened during this scan, and the settled record no longer clears the all-in cost."
+        return "Final check: the legacy settled record does not clear the all-in cost."
     drawdown_hit = book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
-    if quote.key in book.blocked or book.operator_pause or drawdown_hit:
-        return "A knob was tightened during this scan, and the book will not take a new clip."
+    if quote.key in book.blocked:
+        return "Final check: this contract is blocked."
+    if book.operator_pause:
+        return "Final check: new buys are paused by the operator."
+    if drawdown_hit:
+        return "Final check: the account has reached its drawdown limit."
     held = {f"{item.venue}:{item.market_id}:{item.side}" for item in book.positions}
     if quote.key in held or _twin_of(quote, [], book, params):
-        return "A knob was tightened during this scan, and the book already holds this risk."
-    fits, cost, _why = _clip_fits(quote, params, book.equity)
-    if not fits or cost > book.cash + 1e-9:
-        return "A knob was tightened during this scan, and the clip no longer fits the per-trade cap."
+        return "Final check: the book already holds this risk."
+    fits, cost, why = _clip_fits(quote, params, book.equity)
+    if not fits:
+        return f"Final check: {why}"
+    if cost > book.cash + 1e-9:
+        return "Final check: insufficient cash for the all-in cost."
     deployed = sum(item.cost_basis for item in book.positions)
     if deployed + cost > book.equity * params.max_deployed_fraction + 1e-9:
-        return "A knob was tightened during this scan, and the clip no longer fits the book."
+        return "Final check: the clip exceeds the total exposure limit."
     category = sum(item.cost_basis for item in book.positions if item.category == quote.category)
     if category + cost > book.equity * params.max_category_fraction + 1e-9:
-        return "A knob was tightened during this scan, and the clip no longer fits the book."
+        return "Final check: the clip exceeds the category exposure limit."
     if already_bought >= params.max_new_per_cycle:
-        return "A knob was tightened during this scan, and this scan already has its full set of new buys."
+        return "Final check: this scan has reached its limit on new buys."
     return None
 
 
@@ -392,7 +395,7 @@ def _collapse(rows: list[_Row]) -> list[Decision]:
     order = {
         "buy": 0, "block": 1, "veto": 2, "stability": 3,
         "edge": 4, "fee": 5, "horizon": 6, "correlation": 7, "budget": 8,
-        "size": 9, "liquidity": 10, "book": 11, "drawdown": 12, "tightened": 13,
+        "size": 9, "liquidity": 10, "book": 11, "drawdown": 12, "tightened": 13, "recheck": 13,
     }
     decisions = singles + grouped
     decisions.sort(key=lambda item: (order.get(item.reason_code, 9), -(item.edge or -1), -item.group_count))

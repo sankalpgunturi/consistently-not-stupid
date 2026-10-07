@@ -129,7 +129,7 @@ def test_near_engine_refreshes_quote_after_model_review(tmp_path):
     state=engine.run_cycle()
     assert state['counts']['confirmed'] == 1
     assert state['counts']['bought'] == 0
-    assert any(row['reason_code']=='tightened' for row in state['tape'])
+    assert any(row['reason_code']=='recheck' for row in state['tape'])
 
 
 @pytest.mark.parametrize('status,tradable',[('active',True),('open',True),('paused',False),('',False)])
@@ -206,3 +206,11 @@ def test_fill_explanation_uses_refreshed_price_and_fee(tmp_path):
     assert 'Ask 97.0¢' in trade.reason
     assert '2.0¢ a share' in trade.reason
     assert engine.store.positions()[0].reason == trade.reason
+
+
+def test_final_check_explains_quote_move_without_claiming_rule_change():
+    q = make_quote(bid=.89, ask=.91, end_time=NOW+timedelta(minutes=5),
+                   expected_resolution_time=NOW+timedelta(minutes=5))
+    why = tightened_out(q, make_params(entry_window_minutes=10), make_book(streaks={q.key: 2}), now=NOW)
+    assert 'bid 89.0%' in why and 'ask 91.0%' in why
+    assert 'tightened' not in why
