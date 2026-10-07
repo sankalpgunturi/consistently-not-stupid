@@ -278,7 +278,7 @@ td { padding: 10px 10px 10px 0; border-top: 1px solid var(--line); vertical-alig
 /* The daily view leads with the account; detail stays behind disclosures. */
 h1 { font-size: clamp(1.55rem, 3vw, 2.25rem); line-height: 1.1; }
 .top { align-items: center; padding-top: 32px; }
-.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .stat { padding: 22px 24px; box-shadow: none; }
 .stat strong { font-size: clamp(1.7rem, 3vw, 2.65rem); }
 .stat small { display: block; color: var(--muted); margin-top: 4px; }

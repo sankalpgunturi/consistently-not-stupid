@@ -60,11 +60,9 @@ function render(next) {
 
   const totalGain = (book.equity || 0) - (book.start || 0);
   const recent = next.last_24h || {};
-  const multiple = (value) => value == null ? "—" : `${value.toFixed(6).replace(/\.?0+$/, "")}×`;
   const tone = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
   const cards = [
     ["Account value", money(book.equity), "", ""],
-    ["Growth since start", multiple(book.growth_multiple ?? (book.start ? book.equity / book.start : null)), tone(totalGain), ""],
     ["Total profit", money(totalGain), tone(totalGain), ""],
     ["Last 24 hours", money(recent.net_pnl || 0), tone(recent.net_pnl || 0),
       ""],
