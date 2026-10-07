@@ -347,3 +347,10 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 #equity { display: block; width: 100%; height: auto; }
 #equity.hidden { display: none; }
 #equity circle:hover, #equity circle:focus { stroke: var(--cream); stroke-width: 3px; outline: none; }
+
+.trade-history tr.trade-win { background: rgba(157, 204, 134, 0.09); }
+.trade-history tr.trade-loss { background: rgba(229, 137, 114, 0.08); }
+.trade-history tr.trade-win td:first-child { box-shadow: inset 3px 0 var(--green); padding-left: 12px; }
+.trade-history tr.trade-loss td:first-child { box-shadow: inset 3px 0 var(--red); padding-left: 12px; }
+.trade-win .trade-result { color: var(--green); font-weight: 600; }
+.trade-loss .trade-result { color: var(--red); font-weight: 600; }

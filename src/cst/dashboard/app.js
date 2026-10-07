@@ -285,11 +285,13 @@ function renderTrades(rows) {
     const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
     const result = !exit ? "Open" : exit.action === "settle" ? (exit.won ? "Won" : "Lost") : stopped ? "Stop-loss" : "Sold";
     const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
-    return `<tr>
+    const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
+    const outcomeLabel = exit?.action === "sell" ? `${exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat"} · ${result}` : result;
+    return `<tr class="${outcomeClass}">
       <td class="title">${esc(row.title)}</td>
       <td>${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num">${esc(paid)}</td>
-      <td title="${esc(exit?.reason || "")}">${esc(result)}</td>
+      <td class="trade-result" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
       <td class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
       <td class="num" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
       <td class="num" title="${esc(exit ? new Date(exit.ts).toLocaleString() : "")}">${exit ? esc(time(exit.ts)) : "—"}</td>
