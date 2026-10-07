@@ -42,9 +42,8 @@
           <thead><tr><th>Trade</th><th>Pick</th><th>Entry probability</th><th>Paid</th><th>Status</th><th>Profit</th><th>Opened</th><th>Close</th></tr></thead>
           <tbody id="trades"></tbody>
         </table></div>
-        <p class="expected-note">* Expected close / profit if won</p>
         <p class="empty" id="trades-empty">None</p>
-        <button type="button" class="more-trades hidden" id="more-trades" aria-label="Show 5 more trades" title="Show more trades"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button type="button" class="more-trades hidden" id="more-trades" aria-label="Show 5 more trades" title="Show more trades">Show 5 more</button>
       </article>
     </section>
 
@@ -54,7 +53,7 @@
     </details>
 
   </main>
-  <footer class="foot"><p>Kalshi paper trading</p></footer>
+  <footer class="foot"><p>Kalshi paper trading</p><p class="expected-note">* Expected close / profit if won</p></footer>
   <script src="/static/app.js"></script>
 </body>
 </html>

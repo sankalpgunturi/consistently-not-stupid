@@ -178,7 +178,11 @@ function renderTrades(rows, positions = []) {
   }, exit: null, position}));
   const all = [...openStories, ...stories.filter(story => story.exit).reverse()];
   const visible = all.slice(0, tradeLimit);
-  $("more-trades").classList.toggle("hidden", visible.length >= all.length);
+  const more = $("more-trades");
+  const remaining = Math.min(5, all.length - visible.length);
+  more.classList.toggle("hidden", remaining === 0);
+  more.textContent = `Show ${remaining} more`;
+  more.setAttribute("aria-label", `Show ${remaining} more trades`);
   const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
   const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
   $("trades-empty").classList.toggle("hidden", visible.length > 0);

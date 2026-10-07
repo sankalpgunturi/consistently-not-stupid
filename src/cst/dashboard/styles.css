@@ -429,3 +429,8 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .knob-setting output { display: block; color: var(--brass-2); margin-top: 4px; }
 .knob-setting input[type="range"] { display: block; width: 100%; margin: 12px 0 0; min-height: 28px; accent-color: var(--brass); cursor: pointer; }
 .mini:disabled { opacity: .4; cursor: default; }
+
+/* Quiet pagination; the whole line remains an easy tap target. */
+.more-trades { background: transparent; border: 0; border-radius: 0; font-size: .8rem; font-weight: 500; color: var(--dim); min-height: 48px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 5px; }
+.more-trades:hover { background: transparent; color: var(--cream); text-decoration-color: var(--brass); }
+.foot .expected-note { margin: 0; }
