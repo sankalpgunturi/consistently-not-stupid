@@ -140,6 +140,19 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     )
 
 
+def tightened_out(quote: Quote, params: StrategyParams, book: BookView) -> str | None:
+    """A sentence when a mid-scan tighten means this quote no longer clears.
+
+    The scan reads the knobs once, then the fetch can take long enough for an
+    operator to step them. The fill has to see the new bar and the new edge.
+    """
+    if not quote_in_band(quote, params):
+        return "A knob was tightened during this scan, and the quote is no longer at the bar."
+    if _learned_signal(quote, params, book) is None:
+        return "A knob was tightened during this scan, and the settled record no longer clears the all-in cost."
+    return None
+
+
 def _clip_fits(quote: Quote, params: StrategyParams, equity: float) -> tuple[bool, float, str]:
     shares = quote.min_shares
     fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
@@ -326,9 +339,9 @@ def _collapse(rows: list[_Row]) -> list[Decision]:
             key=sample.quote.key,
         ))
     order = {
-        "buy": 0, "equivalence": 1, "block": 2, "veto": 3, "stability": 4,
-        "edge": 5, "fee": 6, "horizon": 7, "correlation": 8, "budget": 9,
-        "size": 10, "liquidity": 11, "book": 12, "drawdown": 13,
+        "buy": 0, "block": 1, "veto": 2, "stability": 3,
+        "edge": 4, "fee": 5, "horizon": 6, "correlation": 7, "budget": 8,
+        "size": 9, "liquidity": 10, "book": 11, "drawdown": 12, "tightened": 13,
     }
     decisions = singles + grouped
     decisions.sort(key=lambda item: (order.get(item.reason_code, 9), -(item.edge or -1), -item.group_count))
@@ -349,7 +362,6 @@ def _decision(row: _Row) -> Decision:
         price=row.quote.ask,
         edge=row.edge,
         key=row.quote.key,
-        pair_id=row.proposal.pair_id if row.proposal else "",
     )
 
 
@@ -359,9 +371,6 @@ def _focus(rows: list[_Row]) -> Decision | None:
     buys = [row for row in rows if row.code == "buy"]
     if buys:
         return _decision(max(buys, key=lambda row: row.edge or 0))
-    waiting = [row for row in rows if row.code == "equivalence"]
-    if waiting:
-        return _decision(max(waiting, key=lambda row: row.edge or 0))
     edges = [row for row in rows if row.code == "edge"]
     if edges:
         return _decision(max(edges, key=lambda row: row.edge if row.edge is not None else -1))

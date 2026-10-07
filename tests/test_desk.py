@@ -19,7 +19,7 @@ from cst.simulate import run_report
 from cst.store import Store
 from cst.strategy import evaluate, price_bucket, quote_in_band, wilson_lower
 from cst.text import related, same_proposition
-from cst.venues.kalshi import quotes_from_kalshi_market
+from cst.venues.kalshi import quotes_from_kalshi_market, record_from_settled_markets, settled_favorite
 from tests.conftest import NOW, make_book, make_params, make_quote
 
 RECORD = {price_bucket(0.94): (100, 100)}
@@ -94,6 +94,38 @@ def test_a_favorite_without_a_record_stays_in_cash():
     assert len(bought.proposals) == 1
     assert bought.proposals[0].signal == "learned"
     assert bought.proposals[0].quote.venue == "kalshi"
+
+
+def test_venue_history_opens_a_bucket_the_desk_has_not_settled(tmp_path):
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    quote = make_quote()
+    bare = evaluate([quote], make_params(), store.book({quote.key: 2}), now=NOW)
+    assert bare.proposals == []
+    store.set_venue_record({price_bucket(0.94): (100, 100)})
+    bought = evaluate([quote], make_params(), store.book({quote.key: 2}), now=NOW)
+    assert len(bought.proposals) == 1
+    assert bought.proposals[0].signal == "learned"
+    assert store.settlements() == []
+    store.add_settlement(Settlement(price_bucket(0.94), False, 0.94, 0.01, -1))
+    assert store.calibration()[price_bucket(0.94)] == (100, 101)
+
+
+def test_a_settled_last_print_is_a_sample_and_a_rail_print_is_not():
+    assert settled_favorite({"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "20"}) == (0.94, True)
+    assert settled_favorite({"result": "no", "last_price_dollars": "0.0600", "volume_fp": "20"}) == (0.94, True)
+    assert settled_favorite({"result": "yes", "last_price_dollars": "0.0600", "volume_fp": "20"}) == (0.94, False)
+    assert settled_favorite({"result": "yes", "last_price_dollars": "1.0000", "volume_fp": "20"}) is None
+    assert settled_favorite({"result": "no", "last_price_dollars": "0.0000", "volume_fp": "20"}) is None
+    assert settled_favorite({"result": "yes", "last_price_dollars": "0.5000", "volume_fp": "20"}) is None
+    assert settled_favorite({"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "0"}) is None
+    assert settled_favorite({"result": "yes", "volume_fp": "20"}) is None
+    assert settled_favorite({"last_price_dollars": "0.9400", "volume_fp": "20"}) is None
+    record = record_from_settled_markets([
+        {"result": "yes", "last_price_dollars": "0.9400", "volume_fp": "20"},
+        {"result": "no", "last_price_dollars": "0.9400", "volume_fp": "20"},
+        {"result": "yes", "last_price_dollars": "1.0000", "volume_fp": "20"},
+    ])
+    assert record[price_bucket(0.94)] == (1, 2)
 
 
 def test_one_event_keeps_one_clip():
@@ -656,6 +688,99 @@ def test_a_tighten_during_the_scan_is_not_reverted(tmp_path):
     assert params.min_probability == 0.91
 
 
+def test_a_missing_bid_is_not_a_quoted_zero_and_does_not_sell(tmp_path):
+    market = {
+        "ticker": "KXTEST-1",
+        "event_ticker": "KXTEST",
+        "title": "Missing bid",
+        "status": "active",
+        "yes_ask_dollars": "0.9400",
+        "no_bid_dollars": "0.0600",
+        "no_ask_dollars": "0.0700",
+        "volume_fp": "20",
+        "open_interest_fp": "20",
+        "close_time": "2026-10-08T00:00:00Z",
+    }
+    parsed = quotes_from_kalshi_market(market, keep_extremes=True)
+    assert all(item.side != "yes" for item in parsed)
+    assert parsed
+    assert all(item.bid > 0 for item in parsed)
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    quote = make_quote()
+    PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", 1)
+    engine.depth = _cover
+    engine.refresher = lambda _venue, _market_id, side: quote_on_side(parsed, side)
+    engine.mark_open()
+    assert engine.store.positions()
+    assert all(trade.action != "sell" for trade in engine.store.trades())
+
+
+def test_a_tighten_during_the_scan_drops_the_fill(tmp_path):
+    quote = make_quote(bid=0.90, ask=0.91)
+    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    engine.refresher = lambda *_args: None
+    engine.depth = _cover
+    engine.decider = lambda _proposals: {}
+    engine.store.set_venue_record({price_bucket(0.91): (100, 100)})
+
+    def fetch(_settings):
+        engine.tighten("min_probability")
+        return [quote], []
+
+    engine.fetcher = fetch
+    state = engine.run_cycle()
+    assert state["counts"]["bought"] == 0
+    assert state["book"]["cash"] == 1000
+    assert state["positions"] == []
+    assert any(row["reason_code"] == "tightened" for row in state["tape"])
+    assert engine.store.params().min_probability == 0.91
+
+
+def test_model_suggestions_wait_for_a_new_settlement(tmp_path):
+    class _Suggest:
+        enabled = True
+        model = "test"
+
+        def review(self, _params, _proposals, _counts, _settlements):
+            return {}, {"min_probability": 0.99}, "The model wants a higher bar."
+
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []), reviewer=_Suggest())
+    for _ in range(3):
+        engine.run_cycle()
+    assert engine.store.params().min_probability == 0.90
+    engine.store.add_settlement(Settlement("0.93–0.96", True, 0.94, 0.01, 0.04))
+    engine.run_cycle()
+    assert engine.store.params().min_probability == 0.91
+    engine.run_cycle()
+    assert engine.store.params().min_probability == 0.91
+
+
+def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_path):
+    quote = make_quote()
+    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    record = {price_bucket(0.94): (100, 100)}
+
+    def history(_settings):
+        return record, None
+
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []), history=history)
+    engine.refresher = lambda *_args: None
+    engine.depth = _cover
+    engine.decider = lambda _proposals: {}
+    state = engine.run_cycle()
+    assert state["counts"]["bought"] == 1
+    assert engine.store.settlements() == []
+    assert engine.store.venue_record()[price_bucket(0.94)] == (100, 100)
+    engine.history = lambda _settings: (None, "Kalshi settled record: down")
+    engine.fetcher = lambda _settings: ([], [])
+    again = engine.run_cycle()
+    assert engine.store.venue_record()[price_bucket(0.94)] == (100, 100)
+    assert any("settled record" in item.lower() for item in again["errors"])
+
+
 def test_a_losing_window_tightens_once_until_the_next_settlement(tmp_path):
     losses = [Settlement("0.93–0.96", False, 0.94, 0.02, -4) for _ in range(10)]
     params = StrategyParams()
@@ -678,6 +803,12 @@ def test_a_losing_window_tightens_once_until_the_next_settlement(tmp_path):
 
 
 def test_origin_follows_the_bound_host(tmp_path):
+    assert host_allowed("[2001:db8::5]:8000", "2001:db8::5")
+    assert origin_allowed("http://[2001:db8::5]:8000", "2001:db8::5")
+    assert not host_allowed("[2001:db8::9]:8000", "2001:db8::5")
+    assert not origin_allowed("http://[2001:db8::9]:8000", "2001:db8::5")
+    assert host_allowed("[::1]:8000", "::1")
+    assert host_allowed("[::1]:8000", "0.0.0.0")
     assert origin_allowed("http://10.1.2.3:8000", "10.1.2.3")
     assert not origin_allowed("http://10.1.2.3:8000", "127.0.0.1")
     assert origin_allowed("http://127.0.0.1:8000", "10.1.2.3")
@@ -726,6 +857,23 @@ def test_origin_follows_the_bound_host(tmp_path):
                 headers={"origin": "http://attacker.example", "host": "attacker.example"},
             ) as socket:
                 socket.receive_json()
+    ipv6 = create_app(engine, start_loop=False, bind_host="2001:db8::5")
+    with TestClient(ipv6, base_url="http://127.0.0.1") as client:
+        home = client.get(
+            "/api/state",
+            headers={"Host": "[2001:db8::5]:8000", "Origin": "http://[2001:db8::5]:8000"},
+        )
+        assert home.status_code == 200
+        other = client.get(
+            "/api/state",
+            headers={"Host": "[2001:db8::5]:8000", "Origin": "http://[2001:db8::9]:8000"},
+        )
+        assert other.status_code == 403
+        with client.websocket_connect(
+            "/ws",
+            headers={"origin": "http://[2001:db8::5]:8000", "host": "[2001:db8::5]:8000"},
+        ) as socket:
+            assert socket.receive_json()["mode"] == "paper"
 
 
 def test_dashboard_ships_with_the_package():

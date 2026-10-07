@@ -212,7 +212,7 @@ class Reviewer:
         payload = {
             "rules": [
                 "Drop a buy only when it is the same risk or the logical opposite of another buy.",
-                "A locked difference between two venues is a reason to keep the cheaper favorite, not to drop it.",
+                "Do not drop a favorite because another proposal is a different event.",
                 "Do not suggest buying anything the desk skipped.",
                 "parameter_updates may only use the provided knobs and should move by a small amount.",
                 "Prefer fewer, clearer trades.",

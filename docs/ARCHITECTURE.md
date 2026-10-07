@@ -8,7 +8,7 @@ Every `scan_interval_seconds` (default 10 minutes) `Engine.run_cycle`:
 
 1. Read Kalshi public markets (first pages, multivariate combos excluded).
 2. Remember which quotes stayed inside the probability band. A favorite has to be stable for `min_stable_scans`.
-3. `strategy.evaluate` builds proposals. A buy exists only when the fee, horizon, size cap, correlation, and the settled record all pass. The confirming price is the Wilson lower bound of that ask's bucket on the desk's own settlements. It has to sit above the all-in cost by `min_edge`, and the bucket needs `min_sample` trades. A high quote with no record stays in cash.
+3. `strategy.evaluate` builds proposals. A buy exists only when the fee, horizon, size cap, correlation, and the settled record all pass. The confirming price is the Wilson lower bound of that ask's bucket. The bucket counts Kalshi settled markets whose last trade landed there, plus this desk's own settlements. It has to sit above the all-in cost by `min_edge`, and the bucket needs `min_sample` observations. A high quote with no record stays in cash. Before each fill the scan re-reads the knobs, because a tighten can land while the book is still being fetched.
 4. If `CST_OPENAI_API_KEY` is set, one `POST /v1/decisions` call (`gpt-6-luna`) may drop a proposed clip. The chat note may also name drops. Unknown ids are ignored.
 5. Before a paper buy, `depth.py` reads the Kalshi orderbook. The other side's bids are the ask. Short size, a moved touch, or a failed read skips the fill.
 6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. A faster loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and stops a clip whose bid fell `stop_gap` under the entry, if that bid has size.
@@ -31,7 +31,7 @@ Every `scan_interval_seconds` (default 10 minutes) `Engine.run_cycle`:
 | What does the page call? | `src/cst/api.py`, `src/cst/dashboard/` |
 | What are the rails and the seed? | `src/cst/models.py` (`RAILS`, `STEPS`), `src/cst/config.py` |
 
-`Quote`, `Proposal`, `Decision`, `Position`, and `BookView` are the records that cross those files. The strategy does not confirm a buy from a second venue. An old book may still hold an `approved_pairs` blob; nothing in the scan reads it.
+`Quote`, `Proposal`, `Decision`, `Position`, and `BookView` are the records that cross those files. The strategy confirms a buy from the settled record, not from a second venue.
 
 ## Human overrides
 

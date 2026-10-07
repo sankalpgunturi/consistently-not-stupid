@@ -8,6 +8,7 @@ and the snapshot socket. There is no login and no route that sends an order.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,12 +43,31 @@ class KnobIn(BaseModel):
 
 
 def _hostname(value: str | None) -> str:
+    """Host from a bind address, a Host header, or an origin.
+
+    An unbracketed IPv6 literal has more than one colon, so splitting on the
+    first colon would keep only the first group. ``--host 2001:db8::5`` has
+    to match a browser Host of ``[2001:db8::5]:8000``.
+    """
     if not value:
         return ""
     text = value.strip().lower()
     if text.startswith("["):
         end = text.find("]")
         return text[1:end] if end > 1 else ""
+    if text.count(":") > 1:
+        try:
+            ipaddress.ip_address(text)
+            return text
+        except ValueError:
+            host, _, port = text.rpartition(":")
+            if port.isdigit():
+                try:
+                    ipaddress.ip_address(host)
+                    return host
+                except ValueError:
+                    pass
+            return text
     return text.split(":")[0]
 
 

@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from cst.models import Quote
+from cst.strategy import price_bucket
 from cst.venues.http import MarketHttp
 
 log = logging.getLogger("cst.kalshi")
@@ -34,13 +35,14 @@ _CATEGORIES = (
 )
 
 
-def _num(value) -> float:
+def _num(value) -> float | None:
+    """None for a missing or unreadable field. A missing bid is not a quoted zero."""
     if value is None or value == "":
-        return 0.0
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return None
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -93,8 +95,8 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     rules = str(market.get("rules_primary") or "")[:700]
     ticker = str(market.get("ticker") or "")
     event_id = str(market.get("event_ticker") or event.get("event_ticker") or ticker)
-    volume = _num(market.get("volume_fp"))
-    liquidity = _num(market.get("open_interest_fp"))
+    volume = _num(market.get("volume_fp")) or 0.0
+    liquidity = _num(market.get("open_interest_fp")) or 0.0
     url = f"https://kalshi.com/markets/{event_id.lower()}"
     sides = (
         ("yes", str(market.get("yes_sub_title") or "Yes"), "yes_bid_dollars", "yes_ask_dollars", "yes_ask_size_fp", "yes_bid_size_fp"),
@@ -106,8 +108,14 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
         ask = _num(market.get(ask_key))
         raw_size = market.get(size_key)
         size = _num(raw_size) if raw_size not in (None, "") else -1.0
+        if size is None:
+            size = -1.0
         raw_bid_size = market.get(bid_size_key)
         bid_size = _num(raw_bid_size) if raw_bid_size not in (None, "") else -1.0
+        if bid_size is None:
+            bid_size = -1.0
+        if bid is None or ask is None:
+            continue
         if not settled and not _book_ok(bid, ask, keep_extremes):
             continue
         if settled and bid <= 0 and ask <= 0:
@@ -178,7 +186,7 @@ def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[st
     wanted: list[str] = []
     seen = set()
     for market in markets:
-        bid = max(_num(market.get("yes_bid_dollars")), _num(market.get("no_bid_dollars")))
+        bid = max(_num(market.get("yes_bid_dollars")) or 0.0, _num(market.get("no_bid_dollars")) or 0.0)
         event_id = str(market.get("event_ticker") or "")
         if bid < 0.85 or not event_id or event_id in seen:
             continue
@@ -196,6 +204,86 @@ def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[st
         if isinstance(event, dict):
             found[event_id] = event
     return found
+
+
+def settled_favorite(market: dict) -> tuple[float, bool] | None:
+    """Last traded favorite in ``[0.90, 1)``, and whether that side won.
+
+    A last price of 0 or 1 is the settlement print, not a quote, so it is not
+    a sample. A cheap yes print means the no side was the favorite.
+    """
+    if not isinstance(market, dict):
+        return None
+    if market.get("mve_collection_ticker") or market.get("mve_selected_legs"):
+        return None
+    result = str(market.get("result") or "").lower()
+    if result not in {"yes", "no"}:
+        return None
+    volume = _num(market.get("volume_fp"))
+    if volume is None or volume < 10:
+        return None
+    last = _num(market.get("last_price_dollars"))
+    if last is None:
+        return None
+    if 0.90 <= last < 1:
+        return last, result == "yes"
+    if 0 < last <= 0.10:
+        price = 1 - last
+        if 0.90 <= price < 1:
+            return price, result == "no"
+    return None
+
+
+def record_from_settled_markets(markets: list[dict]) -> dict[str, tuple[int, int]]:
+    """Wins and samples per price bucket. One last print is one observation."""
+    found: dict[str, list[int]] = {}
+    for market in markets:
+        observed = settled_favorite(market)
+        if observed is None:
+            continue
+        price, won = observed
+        bucket = price_bucket(price)
+        wins, count = found.get(bucket, [0, 0])
+        found[bucket] = [wins + int(won), count + 1]
+    return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
+
+
+def fetch_settled_record(
+    base_url: str,
+    pages: int,
+    page_size: int,
+    http: MarketHttp | None = None,
+) -> tuple[dict[str, tuple[int, int]] | None, str | None]:
+    """The first pages of settled Kalshi markets, counted into price buckets.
+
+    ``None`` for the record means the read failed and the caller should keep
+    the previous sample. An empty dict is a real read that found no favorites.
+    """
+    own = http is None
+    client = http or MarketHttp()
+    root = base_url.rstrip("/")
+    markets: list[dict] = []
+    try:
+        cursor = ""
+        for _ in range(pages):
+            params = {"status": "settled", "limit": str(page_size), "mve_filter": "exclude"}
+            if cursor:
+                params["cursor"] = cursor
+            payload = client.get_json(f"{root}/markets", params=params)
+            if not isinstance(payload, dict):
+                break
+            batch = payload.get("markets") or []
+            markets.extend(item for item in batch if isinstance(item, dict))
+            cursor = payload.get("cursor") or ""
+            if not cursor or not batch:
+                break
+        return record_from_settled_markets(markets), None
+    except Exception as exc:
+        log.warning("kalshi settled record failed: %s", exc)
+        return None, f"Kalshi settled record: {exc}"
+    finally:
+        if own:
+            client.close()
 
 
 def fetch_kalshi_ticker(base_url: str, ticker: str, http: MarketHttp | None = None) -> list[Quote]:

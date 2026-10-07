@@ -90,7 +90,6 @@ class Store:
                 self._put("status", "starting")
                 self._put("paper_started_at", _iso())
                 self._put("csrf", secrets.token_urlsafe(24))
-                self._put("approved_pairs", [])
                 self._put("blocked", [])
                 self._put("operator_pause", False)
                 self.conn.execute("INSERT INTO equity (ts, equity) VALUES (?, ?)", (_iso(), self.bankroll))
@@ -102,8 +101,6 @@ class Store:
                 self._put("paper_started_at", _iso())
             if not self._get("csrf"):
                 self._put("csrf", secrets.token_urlsafe(24))
-            if self._get("approved_pairs") is None:
-                self._put("approved_pairs", [])
             if self._get("blocked") is None:
                 self._put("blocked", [])
             if self._get("operator_pause") is None:
@@ -363,12 +360,32 @@ class Store:
             for row in rows
         ]
 
+    def venue_record(self) -> dict[str, tuple[int, int]]:
+        with self.lock:
+            raw = self._get("venue_record") or {}
+        found: dict[str, tuple[int, int]] = {}
+        if not isinstance(raw, dict):
+            return found
+        for bucket, pair in raw.items():
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                found[str(bucket)] = (int(pair[0]), int(pair[1]))
+        return found
+
+    def set_venue_record(self, counts: dict[str, tuple[int, int]]) -> None:
+        payload = {bucket: [int(wins), int(count)] for bucket, (wins, count) in counts.items()}
+        with self.lock:
+            self._put("venue_record", payload)
+            self.conn.commit()
+
     def calibration(self) -> dict[str, tuple[int, int]]:
+        """Venue settled history, plus this desk's own resolutions in the same buckets."""
         found: dict[str, list[int]] = {}
+        for bucket, (wins, count) in self.venue_record().items():
+            found[bucket] = [wins, count]
         for row in self.settlements():
-            wins, n = found.get(row.bucket, [0, 0])
-            found[row.bucket] = [wins + (1 if row.won else 0), n + 1]
-        return {bucket: (wins, n) for bucket, (wins, n) in found.items()}
+            wins, count = found.get(row.bucket, [0, 0])
+            found[row.bucket] = [wins + (1 if row.won else 0), count + 1]
+        return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
 
     def add_retro(self, payload: dict) -> None:
         with self.lock:
@@ -399,10 +416,6 @@ class Store:
         with self.lock:
             return str(self._get("csrf") or "")
 
-    def approved_pairs(self) -> set[str]:
-        with self.lock:
-            return set(self._get("approved_pairs") or [])
-
     def blocked(self) -> set[str]:
         with self.lock:
             return set(self._get("blocked") or [])
@@ -414,15 +427,6 @@ class Store:
     def set_pause(self, paused: bool) -> None:
         with self.lock:
             self._put("operator_pause", bool(paused))
-            self.conn.commit()
-
-    def approve_pair(self, pair_id: str, note: str) -> None:
-        with self.lock:
-            pairs = list(self._get("approved_pairs") or [])
-            if pair_id not in pairs:
-                pairs.append(pair_id)
-                self._put("approved_pairs", pairs)
-            self._audit("operator", "approve_pair", "", pair_id, note)
             self.conn.commit()
 
     def block(self, key: str, reason: str) -> None:
@@ -479,7 +483,6 @@ class Store:
             streaks=streaks or {},
             calibration=self.calibration(),
             settlements=self.settlements(),
-            approved_pairs=self.approved_pairs(),
             blocked=self.blocked(),
             operator_pause=self.operator_pause(),
         )

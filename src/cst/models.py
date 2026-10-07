@@ -181,7 +181,6 @@ class Decision:
     edge: float | None = None
     group_count: int = 1
     key: str = ""
-    pair_id: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -195,7 +194,6 @@ class Proposal:
     signal: str
     detail: str
     confirm: str
-    pair_id: str = ""
 
     @property
     def key(self) -> str:
@@ -307,6 +305,5 @@ class BookView:
     streaks: dict[str, int] = field(default_factory=dict)
     calibration: dict[str, tuple[int, int]] = field(default_factory=dict)
     settlements: list[Settlement] = field(default_factory=list)
-    approved_pairs: set[str] = field(default_factory=set)
     blocked: set[str] = field(default_factory=set)
     operator_pause: bool = False

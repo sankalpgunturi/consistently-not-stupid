@@ -4,7 +4,7 @@ Living log for Consistently Not Stupid. Update this file at the end of each phas
 
 ## Intent
 
-A Kalshi paper desk. Polymarket was removed; do not add it back, and do not buy a favorite because the quote is high. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one. A buy needs the settled record to clear the all-in cost. A new book stays in cash until that record exists.
+A Kalshi paper desk. Polymarket was removed; do not add it back, and do not buy a favorite because the quote is high. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one. A buy needs the settled record to clear the all-in cost. That record is seeded from Kalshi's settled last prints, not from a bootstrap of unconfirmed clips.
 
 ## Phase 1 — Plan
 
@@ -88,4 +88,8 @@ Left open at the time, and written in `docs/GAPS.md`: no live wire, the 0.6 drop
 
 Status: done. Polymarket is out of the repo: the Gamma reader, the CLOB depth check, the fee schedule, the pair-approval route, and the dashboard control. The desk reads Kalshi. A buy still needs the settled record. Cross-venue pair approval was the only other confirmation, and it cannot fire with one venue, so it is gone from the strategy and the page. An old sqlite file may still contain `approved_pairs`; the scan does not read it.
 
-Cold start is real. The Wilson lower bound of a perfect 30-for-30 record is about 89%, which does not clear a 90¢ ask plus the Kalshi fee. The book stays in cash until its own settlements are long enough. Do not invent a looser first-trade rule to get that record started.
+Cold start was real at the end of this phase: the Wilson lower bound of a perfect 30-for-30 record is about 89%, which does not clear a 90¢ ask plus the Kalshi fee, and the only sample was the desk's own fills. Phase 8 seeds that sample from Kalshi instead of leaving the gate shut.
+
+## Phase 8 — A record the desk can actually use
+
+Status: done. The entry sample is the first pages of settled Kalshi markets, counted by the last trade's price bucket, plus this desk's own resolutions. A last price of 0 or 1 is not a quote. The desk does not buy extra clips to build the sample. The governor and a model suggestion both wait for a new settlement of ours before they tighten. A missing Kalshi bid is not a quoted zero. A tighten during the fetch applies to that scan's fills. An unbracketed IPv6 bind matches the bracketed Host a browser sends. Pair-approval fields are gone from the snapshot and the decision.

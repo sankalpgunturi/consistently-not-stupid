@@ -15,8 +15,8 @@ from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band
-from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker
+from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out
+from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
 
 log = logging.getLogger("cst.engine")
 
@@ -24,6 +24,10 @@ log = logging.getLogger("cst.engine")
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
     return quotes, [err] if err else []
+
+
+def default_history(settings: Settings) -> tuple[dict[str, tuple[int, int]] | None, str | None]:
+    return fetch_settled_record(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
 
 
 def quote_on_side(quotes: list[Quote], side: str) -> Quote | None:
@@ -43,11 +47,19 @@ def _shown_status(raw: str, paused: bool) -> str:
 
 
 class Engine:
-    def __init__(self, settings: Settings, store: Store | None = None, fetcher=None, reviewer: Reviewer | None = None, depth=None, decider=None):
+    def __init__(self, settings: Settings, store: Store | None = None, fetcher=None, reviewer: Reviewer | None = None, depth=None, decider=None, history=None):
         self.settings = settings
         self.store = store or Store(settings.db_path, settings.seed_params(), float(settings.bankroll))
         self.broker = PaperBroker(self.store)
         self.fetcher = fetcher or default_fetch
+        # A test that injects quotes should not also call the public settled feed.
+        # Production leaves both empty and seeds the record from Kalshi.
+        if history is not None:
+            self.history = history
+        elif fetcher is None:
+            self.history = default_history
+        else:
+            self.history = None
         self.reviewer = reviewer or Reviewer(settings.openai_api_key, settings.openai_model)
         self.depth = depth
         self.decider = decider
@@ -137,6 +149,9 @@ class Engine:
         started = time.time()
         params = self.store.params()
         quotes, errors = self.fetcher(self.settings)
+        history_error = self._refresh_history()
+        if history_error:
+            errors.append(history_error)
         cycle = self.store.next_cycle()
         streaks = self.store.observe(cycle, [q.key for q in quotes if quote_in_band(q, params)])
         book = self.store.book(streaks)
@@ -169,6 +184,21 @@ class Engine:
             if refusal is not None:
                 decisions.append(refusal)
                 continue
+            fresh = self.store.params()
+            why = tightened_out(proposal.quote, fresh, book)
+            if why:
+                decisions.append(Decision(
+                    action="skipped",
+                    reason_code="tightened",
+                    title=proposal.quote.title,
+                    venue=proposal.quote.venue,
+                    outcome=proposal.quote.outcome,
+                    detail=why,
+                    price=proposal.quote.ask,
+                    edge=proposal.edge,
+                    key=proposal.key,
+                ))
+                continue
             trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
             if trade is None:
                 decisions.append(Decision(
@@ -191,18 +221,20 @@ class Engine:
         settlements = self.store.settlements()
         seen = self.store.governor_seen()
         prior: dict[str, float] = {}
-        heuristic_keys: set[str] = set()
 
         def revise(current):
+            # Model suggestions use the same settlement gate as the heuristic.
+            # An unchanged book does not ratchet, even when the model asks for 0.99.
+            if len(settlements) <= seen:
+                return current, [], {}
             heuristic = heuristic_updates(current, settlements, seen)
-            heuristic_keys.update(heuristic)
             merged = merge_suggestions(heuristic, suggestions)
             revised, notes, applied_now = govern(current, merged, set(heuristic), settlements)
             prior.update({key: getattr(current, key) for key in applied_now})
             return revised, notes, applied_now
 
         updated, notes, applied = self.store.revise_params(revise)
-        if any(key in heuristic_keys for key in applied):
+        if applied:
             self.store.set_governor_seen(len(settlements))
         if applied:
             self.store.append_audit(
@@ -281,6 +313,15 @@ class Engine:
             fee_per_share=fee_per,
             pnl=pnl,
         ))
+
+    def _refresh_history(self) -> str | None:
+        if self.history is None:
+            return None
+        record, err = self.history(self.settings)
+        if err or record is None:
+            return err or "Kalshi settled record: no sample."
+        self.store.set_venue_record(record)
+        return None
 
     def _refresh(self, venue: str, market_id: str, side: str) -> Quote | None:
         if self.refresher is not None:
@@ -430,7 +471,6 @@ class Engine:
             "paper_started_at": started,
             "paper_age_days": round(age_days, 2),
             "operator_pause": operator_pause,
-            "approved_pairs": sorted(self.store.approved_pairs()),
             "status": _shown_status(self.store.status(), paused),
             "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "next_scan_at": info.get("next_scan_at") or self._next_scan.isoformat(timespec="seconds"),
