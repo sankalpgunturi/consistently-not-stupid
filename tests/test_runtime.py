@@ -233,3 +233,27 @@ def test_empty_book_reviews_are_throttled_but_new_evidence_is_reviewed(tmp_path,
     assert engine._review_due(params,[],book,[],['New venue failure'],now)[0] is True
     book.calibration={'0.93–0.96':(1,1)}
     assert engine._review_due(params,[],book,[],[],now)[0] is True
+
+
+def test_report_keeps_research_payoffs_out_of_paper_ledger(tmp_path):
+    from tools.paper_report import report
+    from cst.near_resolution import observe_and_resolve
+    from tests.conftest import NOW
+    from datetime import timedelta
+    params=StrategyParams(entry_window_minutes=10)
+    store=Store(tmp_path/'book.sqlite',params,1000)
+    quotes=[make_quote(market_id=f'm{i}',event_id=f'e{i}',expected_resolution_time=NOW+timedelta(minutes=5)) for i in range(3)]
+    observe_and_resolve(store,Settings(),quotes,params,NOW,resolve=False)
+    store.conn.execute("UPDATE near_observations SET result='yes' WHERE ticker='m0'")
+    store.conn.execute("UPDATE near_observations SET result='no' WHERE ticker='m1'")
+    store.conn.commit()
+    result=report(store.path);research=result['research_reference']
+    assert research['resolved_events']==2
+    assert research['pending_events']==1
+    assert research['wins']==1 and research['losses']==1
+    assert research['quote_reference_payoff']==pytest.approx(-.90)
+    assert research['recent_losses'][0]['ticker']=='m1'
+    assert result['cash']==1000
+    assert result['opened_trades']==0
+    assert result['realized_pnl']==0
+    assert all(result['ledger_checks'].values())

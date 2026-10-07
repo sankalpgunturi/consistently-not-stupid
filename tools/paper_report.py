@@ -6,6 +6,32 @@ from pathlib import Path
 import sqlite3
 
 
+def research_reference(conn) -> dict:
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='near_observations'").fetchone():
+        return {"available": False}
+    rows = [dict(row) for row in conn.execute(
+        "SELECT ticker,side,price,fee,bucket,observed_at,expected_at,result,resolved_at FROM near_observations ORDER BY observed_at")]
+    resolved = [r for r in rows if r["result"] in {"yes", "no"}]
+    losses = [r for r in resolved if r["side"] != r["result"]]
+    cost = sum(r["price"] + r["fee"] for r in resolved)
+    payouts = len(resolved) - len(losses)
+    buckets = {}
+    for row in resolved:
+        item = buckets.setdefault(row["bucket"], {"resolved": 0, "wins": 0, "quote_payoff": 0})
+        won = row["side"] == row["result"]
+        item["resolved"] += 1
+        item["wins"] += int(won)
+        item["quote_payoff"] += int(won) - row["price"] - row["fee"]
+    for item in buckets.values():
+        item["quote_payoff"] = round(item["quote_payoff"], 6)
+    return {"available": True, "observed_events": len(rows), "resolved_events": len(resolved),
+            "pending_events": len(rows)-len(resolved), "wins": payouts, "losses": len(losses),
+            "reference_cost": round(cost, 6), "reference_payout": payouts,
+            "quote_reference_payoff": round(payouts-cost, 6), "buckets": buckets,
+            "recent_losses": losses[-10:], "recent_observations": rows[-30:],
+            "note": "Research only, not paper fills or ledger profit. Assumes one contract at each first recorded ask plus fee, held to its official outcome. Excludes executable depth, portfolio vetoes, stops, slippage and API costs. Shared risks may correlate."}
+
+
 def report(path: Path) -> dict:
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
@@ -32,6 +58,7 @@ def report(path: Path) -> dict:
         scans = [json.loads(row[0]) for row in conn.execute("SELECT payload FROM scans ORDER BY cycle DESC LIMIT 12")]
         return {
             "mode": "paper",
+            "research_reference": research_reference(conn),
             "operating_costs_included": False,
             "model_usage_note": "Provider usage is archived with each scan where available; unpriced API costs are not deducted from the trading ledger.",
             "started_at": meta("paper_started_at"),
