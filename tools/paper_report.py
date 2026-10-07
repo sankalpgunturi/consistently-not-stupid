@@ -32,6 +32,8 @@ def report(path: Path) -> dict:
         scans = [json.loads(row[0]) for row in conn.execute("SELECT payload FROM scans ORDER BY cycle DESC LIMIT 12")]
         return {
             "mode": "paper",
+            "operating_costs_included": False,
+            "model_usage_note": "Provider usage is archived with each scan where available; unpriced API costs are not deducted from the trading ledger.",
             "started_at": meta("paper_started_at"),
             "starting_cash": start,
             "cash": cash,

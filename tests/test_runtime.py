@@ -193,3 +193,16 @@ def test_review_sees_active_timing_and_explicit_side(monkeypatch):
     assert 'max_days_to_expiry' not in seen['knobs']
     assert seen['proposals'][0]['side']=='no'
     assert seen['proposals'][0]['expected_resolution_time']==q.expected_resolution_time.isoformat()
+
+
+def test_review_preserves_provider_usage_without_inventing_cost(monkeypatch):
+    usage={'prompt_tokens':120,'completion_tokens':30,'total_tokens':150}
+    response=SimpleNamespace(usage=usage, choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"Recorded"}'))])
+    monkeypatch.setattr('openai.OpenAI',lambda **_:SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_:response))))
+    reviewer=Reviewer('test','test')
+    reviewer.review(StrategyParams(),[],{},[])
+    assert reviewer.last_usage==usage
+    assert 'cost_usd' not in reviewer.last_usage
+    reviewer.api_key=''
+    reviewer.review(StrategyParams(),[],{},[])
+    assert reviewer.last_usage is None

@@ -232,6 +232,7 @@ class Engine:
         evaluated_at = datetime.now(timezone.utc)
         days = evaluate_days(self.store, evaluated_at)
         result = evaluate(quotes, params, book, now=evaluated_at)
+        self._veto_usage = None
         veto = self._veto(result.proposals)
         kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
         if isinstance(self.reviewer, Reviewer):
@@ -371,6 +372,12 @@ class Engine:
             "cycle": cycle,
             "actual_bought": bought,
             "proposed_updates": suggestions,
+            "model_usage": {
+                "retrospective": {"model": getattr(self.reviewer, "model", ""), "usage": getattr(self.reviewer, "last_usage", None)},
+                "correlation": {"model": "gpt-6-luna", "usage": self._veto_usage},
+                "cost_usd": None,
+                "note": "Provider token usage where available. API billing is separate from the paper trading ledger; missing usage or pricing is not zero cost.",
+            },
             "settlements_seen": len(settlements),
         }
         retro["notes"].insert(0, f"Execution: {bought} paper buys; {len(settlements)} settlements recorded. Model commentary is a pre-fill review.")
@@ -401,6 +408,7 @@ class Engine:
         self.store.save_scan(cycle, {
             **info, "params": params.to_json(), "params_after": updated.to_json(),
             "source_sha256": self.source_sha256,
+            "model_usage": retro["model_usage"],
             "quotes_retrieved_at": retrieved_at.isoformat(), "evaluated_at": evaluated_at.isoformat(),
             "book_before": {
                 "equity": book.equity, "cash": book.cash, "peak": book.peak, "deployed": book.deployed,
@@ -515,7 +523,7 @@ class Engine:
     def _veto(self, proposals) -> dict[str, str]:
         if self.decider is not None:
             return self.decider(proposals)
-        return veto_proposals(proposals, self.settings.openai_api_key)
+        return veto_proposals(proposals, self.settings.openai_api_key, usage_sink=lambda usage: setattr(self, "_veto_usage", usage))
 
     def set_pause(self, paused: bool) -> dict:
         old = self.store.operator_pause()

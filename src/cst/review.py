@@ -197,6 +197,7 @@ class Reviewer:
         self.last_error: str | None = None
         self.concerns: list[str] = []
         self.context: dict[str, Any] = {}
+        self.last_usage: dict | None = None
 
     @property
     def enabled(self) -> bool:
@@ -211,6 +212,7 @@ class Reviewer:
     ) -> tuple[dict[str, str], dict[str, float], str]:
         """Returns drop reasons by quote key, raw parameter suggestions, and a summary."""
         self.last_error = None
+        self.last_usage = None
         self.concerns = []
         if not self.enabled:
             return {}, {}, ""
@@ -297,6 +299,8 @@ class Reviewer:
                 {"role": "user", "content": json.dumps(payload)},
             ],
         )
+        usage = getattr(response, "usage", None)
+        self.last_usage = usage.model_dump() if hasattr(usage, "model_dump") else usage if isinstance(usage, dict) else None
         text = response.choices[0].message.content or "{}"
         parsed = json.loads(text)
         if not isinstance(parsed, dict):

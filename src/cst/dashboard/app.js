@@ -70,7 +70,7 @@ function render(next) {
   const tone = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
   const cards = [
     ["Account value", money(book.equity), "", `${multiple(book.start ? book.equity / book.start : null)} initial capital`],
-    ["Total profit", money(totalGain), tone(totalGain), `Since ${money(book.start)} · After fees`],
+    ["Total profit", money(totalGain), tone(totalGain), `Since ${money(book.start)} · After trading fees`],
     ["Last 24 hours", money(recent.net_pnl || 0), tone(recent.net_pnl || 0),
       `${multiple(recent.multiple)} · ${recent.partial ? "Since start" : "vs. 24 hours ago"}`],
   ];

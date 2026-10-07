@@ -27,6 +27,7 @@ def period_report(store, start, end, *, current_equity=None, include_evidence=Tr
         'start':_iso(start), 'end':_iso(end), 'opening_equity':opening, 'closing_equity':closing,
         'net_pnl':round(pnl,6), 'return_pct':round(pnl/opening*100,6) if opening else None,
         'realized_pnl':round(realized,6), 'unrealized_change':round(pnl-realized,6),
+        'operating_costs_included':False,
         'fees_paid':round(sum(float(t['fee']) for t in trades),6),
         'buys':sum(t['action']=='buy' for t in trades),
         'closed_trades':sum(t['action'] in {'sell','settle'} for t in trades),
@@ -38,7 +39,7 @@ def period_report(store, start, end, *, current_equity=None, include_evidence=Tr
         'scan_totals':scan_totals, 'scan_count':len(scans),
         'scan_errors':[error for scan in scans for error in scan.get('errors',[])],
         'changes':[dict(row) for row in changes],
-        'boundary_note':'Uses the latest available mark at or before each boundary; fees are already included in net P&L. Flat with no trades is not evidence of profitability.',
+        'boundary_note':'Uses the latest available mark at or before each boundary; fees are already included in net P&L. Model/API operating costs are separate and not deducted. Flat with no trades is not evidence of profitability.',
     }
 
 

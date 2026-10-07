@@ -105,7 +105,7 @@ def parse_veto(body, name_to_key: dict[str, str]) -> dict[str, str]:
     return drops
 
 
-def veto_proposals(proposals: list[Proposal], api_key: str, timeout: float = 20) -> dict[str, str]:
+def veto_proposals(proposals: list[Proposal], api_key: str, timeout: float = 20, usage_sink=None) -> dict[str, str]:
     if not api_key.strip() or not proposals:
         return {}
     body, mapping = build_request(proposals)
@@ -124,4 +124,6 @@ def veto_proposals(proposals: list[Proposal], api_key: str, timeout: float = 20)
     except Exception as exc:
         log.warning("decisions call failed open: %s", exc)
         return {}
+    if usage_sink is not None:
+        usage_sink(payload.get("usage") if isinstance(payload, dict) else None)
     return parse_veto(payload, mapping)
