@@ -70,3 +70,5 @@ All Kalshi `MarketHttp` clients share a paced 20 requests/second ceiling with no
 The quote monitor continues during model review. Discovery is not an entry quote: only freshly fetched batches are evaluated, duplicate snapshots cannot count as another stable scan, and failed or stale reads supply no substitute quotes. Two stable scans now mean two fresh observations about a second apart. Research outcome polling runs every 30 seconds. Each scan archives actual duration, feed request count, current cap and throttles. Pre-fill model vetoes, fresh-quote/depth checks and portfolio limits remain in force.
 
 References: https://docs.kalshi.com/getting_started/rate_limits and https://docs.kalshi.com/api-reference/market/get-markets.
+
+During model veto and review calls, a worker performs model I/O while the scan thread continues held-position checks at intervals of at most one second between completed checks. The scan thread retains the execution lock and performs all settlements and stop exits. Model work still cannot originate a buy, and admission rechecks the current book after the model returns. Network and depth-read latency can extend the monitoring interval.

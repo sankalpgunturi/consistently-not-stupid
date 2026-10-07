@@ -8,6 +8,7 @@ import hashlib
 import threading
 import time
 from collections import Counter
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -223,6 +224,33 @@ class Engine:
         finally:
             self._lock.release()
 
+    def _model_wait(self, call):
+        """Wait for model I/O while the lock-owning scan thread manages exits.
+
+        The worker may only produce vetoes/suggestions. All fills remain on the
+        scan thread under its existing lock; final admission uses the fresh book.
+        """
+        future = Future()
+
+        def work():
+            try:
+                future.set_result(call())
+            except BaseException as exc:
+                future.set_exception(exc)
+
+        threading.Thread(target=work, name="cst-model", daemon=True).start()
+        while True:
+            try:
+                return future.result(timeout=max(.1, min(1, self.store.params().mark_interval_seconds)))
+            except FutureTimeout:
+                if future.done():
+                    # A timeout raised by the model itself is not a polling timeout.
+                    return future.result()
+                try:
+                    self.mark_open(locked=True)
+                except Exception:
+                    log.exception("Position check failed while waiting for model")
+
     def _run_locked(self) -> dict:
         self.store.set_status("scanning")
         started = time.time()
@@ -249,7 +277,7 @@ class Engine:
         days = evaluate_days(self.store, evaluated_at)
         result = evaluate(quotes, params, book, now=evaluated_at)
         self._veto_usage = None
-        veto = self._veto(result.proposals)
+        veto = self._model_wait(lambda: self._veto(result.proposals))
         kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
         if isinstance(self.reviewer, Reviewer):
             self.reviewer.context = {
@@ -283,7 +311,8 @@ class Engine:
             }
         review_due, review_signature = self._review_due(params, result.proposals, book, days, errors, evaluated_at)
         if review_due:
-            drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
+            drops, suggestions, model_summary = self._model_wait(
+                lambda: self.reviewer.review(params, kept, result.counts, book.settlements))
             if isinstance(self.reviewer, Reviewer) and self.reviewer.enabled and not self.reviewer.last_error:
                 with self.store.lock:
                     self.store._put("last_model_review", {"at": datetime.now(timezone.utc).isoformat(), "signature": review_signature})

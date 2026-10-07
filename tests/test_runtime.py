@@ -332,3 +332,53 @@ def test_legacy_evidence_still_triggers_review(tmp_path):
     assert not engine._review_due(params, [], book, [], [], now)[0]
     book.calibration = {'0.93–0.96': (1, 1)}
     assert engine._review_due(params, [], book, [], [], now)[0]
+
+
+@pytest.mark.parametrize('phase', ['veto', 'review'])
+def test_stop_loss_executes_while_model_is_waiting(tmp_path, phase):
+    import threading
+    from datetime import datetime, timedelta, timezone
+    from cst.depth import DepthResult
+    from tests.conftest import make_quote
+
+    engine = Engine(Settings(data_dir=str(tmp_path), stop_loss_minutes=2, exit_probability=.6),
+                    fetcher=lambda _: ([], []))
+    q = make_quote(bid=.89, ask=.90)
+    PaperBroker(engine.store).buy(q, 1, 'paper_favorite', 'test', 0)
+    engine.refresher = lambda *_: make_quote(bid=.59, ask=.60,
+        end_time=datetime.now(timezone.utc)+timedelta(seconds=90))
+    engine.depth = lambda *_: DepthResult(True, 1, 'covered')
+    sold = threading.Event()
+    threads = []
+    original_sell = engine._execute_sell
+
+    def sell(*args):
+        threads.append(threading.get_ident())
+        result = original_sell(*args)
+        sold.set()
+        return result
+
+    def slow_model(*args):
+        assert sold.wait(5), 'Exit monitoring stalled behind model review'
+        assert not engine.store.positions()
+        return {} if phase == 'veto' else ({}, {}, 'Review completed after exit')
+
+    engine._execute_sell = sell
+    if phase == 'veto':
+        engine.decider = slow_model
+    else:
+        engine.decider = lambda _: {}
+        engine.reviewer.review = slow_model
+    state = engine.run_cycle()
+    assert state['status'] != 'error'
+    assert sold.is_set()
+    assert threads == [threading.get_ident()]
+    assert len([t for t in engine.store.trades() if t.action == 'sell']) == 1
+
+
+def test_model_timeout_exception_is_not_swallowed_as_polling_timeout(tmp_path):
+    engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _: ([], []))
+    def fail():
+        raise TimeoutError('model request expired')
+    with engine._lock, pytest.raises(TimeoutError, match='model request expired'):
+        engine._model_wait(fail)
