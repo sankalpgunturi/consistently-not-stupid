@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consistently Not Stupid</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%231a1714' width='32' height='32' rx='6'/%3E%3Cpath d='M6 20h20M8 16c2-6 14-6 16 0' stroke='%23d7a15e' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,620&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@380;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <p class="eyebrow">Paper desk · Kalshi</p>
+      <h1>Consistently Not Stupid</h1>
+    </div>
+    <div class="top-meta">
+      <span class="pill paper" id="mode">Paper</span>
+      <span class="pill off" id="live-mode">Live unavailable</span>
+      <span class="live" id="live"><i></i><span>Connecting</span></span>
+      <span class="clock" id="clock">—</span>
+      <span class="next" id="next">Next scan —</span>
+      <button type="button" id="pause" class="btn ghost">Pause buys</button>
+      <button type="button" id="scan" class="btn">Scan now</button>
+    </div>
+  </header>
+
+  <blockquote class="vision">
+    <p>It is remarkable how much long-term advantage people like us have gotten by trying to be consistently not stupid, instead of trying to be very intelligent.</p>
+    <cite>Charlie Munger</cite>
+  </blockquote>
+
+  <p class="thesis" id="thesis">
+    Cash is the default. A favorite is bought only when the book is at least 90%, the win still pays after the Kalshi fee, and the settled record says it is cheap. Each buy is one contract. You can pause, block, close, or tighten. You cannot force a buy the rule refused.
+  </p>
+
+  <section class="evidence" id="evidence" aria-label="Paper window"></section>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="funnel" id="funnel" aria-label="How this scan narrowed the book"></section>
+  <p class="coverage">This scan is the first pages of open Kalshi markets, not every contract on the venue.</p>
+
+  <section class="layout">
+    <div class="stack">
+      <article class="card focus" id="focus">
+        <p class="eyebrow">Closest look</p>
+        <h2 id="focus-title">Waiting for the first scan</h2>
+        <p id="focus-detail">The desk is about to read Kalshi. Nothing is bought until a quote clears the fee and the settled record.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Equity</h2>
+          <p class="muted">Starting cash is the thin line.</p>
+        </div>
+        <canvas id="equity" width="900" height="280"></canvas>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Open trades</h2>
+          <p class="muted" id="position-count">Cash is the position.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Contract</th>
+                <th>Paid</th>
+                <th>Mark</th>
+                <th>If it wins</th>
+                <th>If it loses</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="positions"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="positions-empty">No open trades. The cash is doing the waiting.</p>
+      </article>
+    </div>
+
+    <aside class="stack">
+      <article class="card">
+        <div class="card-head">
+          <h2>This scan</h2>
+          <p class="muted" id="scan-meta">—</p>
+        </div>
+        <ol class="tape" id="tape"></ol>
+        <p class="empty" id="tape-empty">The tape fills in when the scan finishes.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>After the scan</h2>
+          <p class="muted" id="retro-source">Governor</p>
+        </div>
+        <p id="retro" class="prose">The note appears after the first pass.</p>
+        <ul id="retro-notes" class="notes"></ul>
+      </article>
+    </aside>
+  </section>
+
+  <section class="card model">
+    <div class="card-head">
+      <h2>Why a 90% quote is not a trade</h2>
+      <p class="muted">A separate model. It does not move the paper book.</p>
+    </div>
+    <div class="model-grid">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rule</th>
+              <th>World</th>
+              <th>Mean trades</th>
+              <th>Mean P&amp;L</th>
+              <th>Fees</th>
+              <th>Paths under $1,000</th>
+            </tr>
+          </thead>
+          <tbody id="model-body"></tbody>
+        </table>
+      </div>
+      <canvas id="model-chart" width="640" height="280"></canvas>
+    </div>
+    <p class="muted" id="model-note"></p>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Knobs</h2>
+      <p class="muted">Tighten moves one step toward less risk. Loosening is refused. The scan clock is not a risk knob.</p>
+    </div>
+    <div class="knobs" id="knobs"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Fills and settlements</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>What</th>
+            <th>Price</th>
+            <th>Fee</th>
+            <th>P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody id="trades"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="trades-empty">No fills yet.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>What changed by hand</h2>
+      <p class="muted">Append-only. Reset clears it with the book.</p>
+    </div>
+    <ul class="notes" id="audit"></ul>
+    <p class="empty" id="audit-empty">No overrides yet.</p>
+  </section>
+
+  <footer class="foot">
+    <p>Paper fills only. Live sending is unavailable, and this page has no control that arms it. A favorite can still lose, and the loss is most of the premium. The desk keeps that clip small and sits in cash when the edge is only the fee.</p>
+    <button type="button" id="reset" class="text-btn">Reset the paper book</button>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
