@@ -260,6 +260,7 @@ class Engine:
                     "edge": "Historical lower confidence bound minus ask and fee; null if not evaluated or sample too small.",
                 },
                 "sample_refusals": [item.to_json() for item in result.decisions if item.action != "bought"][:20],
+                "sample_refusals_note": "At most 20 grouped examples are supplied. Each example's group_count counts the contracts it represents; do not compare the number of examples with the total refusal count or infer missing records from that difference. Full scan decisions are archived separately.",
                 "agent_reviews": [row["reason"] for row in self.store.audit(12) if row["actor"] == "codex"][:3],
             }
         review_due, review_signature = self._review_due(params, result.proposals, book, days, errors, evaluated_at)
