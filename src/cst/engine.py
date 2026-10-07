@@ -436,7 +436,14 @@ class Engine:
                 return current, [], {}
             heuristic = heuristic_updates(current, settlements, seen)
             merged = merge_suggestions(heuristic, suggestions)
+            protected = []
+            if current.entry_window_minutes > 0:
+                # Dashboard controls are the operator's experiment settings.
+                # Reviews may recommend changes, but cannot move these sliders.
+                protected = [key for key in merged if key in OPERATOR_CONTROLS]
+                merged = {key: value for key, value in merged.items() if key not in OPERATOR_CONTROLS}
             revised, notes, applied_now = govern(current, merged, set(heuristic), settlements)
+            notes.extend(f"Kept operator-selected {key}; review suggestions do not change dashboard controls." for key in protected)
             prior.update({key: getattr(current, key) for key in applied_now})
             return revised, notes, applied_now
 

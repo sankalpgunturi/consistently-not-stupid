@@ -72,3 +72,5 @@ The quote monitor continues during model review. Discovery is not an entry quote
 References: https://docs.kalshi.com/getting_started/rate_limits and https://docs.kalshi.com/api-reference/market/get-markets.
 
 During model veto and review calls, a worker performs model I/O while the scan thread continues held-position checks at intervals of at most one second between completed checks. The scan thread retains the execution lock and performs all settlements and stop exits. Model work still cannot originate a buy, and admission rechecks the current book after the model returns. Network and depth-read latency can extend the monitoring interval.
+
+In short-window mode, automatic reviews preserve all operator-selected dashboard controls. Suggestions remain in the retrospective, but probability, timing, scan interval, amount per bet and stop-loss controls require an explicit operator change. Other automatic adjustments retain the tightening-only rails; legacy replay keeps its previous governor behavior.

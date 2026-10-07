@@ -406,3 +406,26 @@ def test_early_exit_triggers_one_review_without_inventing_settlement(tmp_path, m
     assert len(calls) == 2
     engine.store._put('mode', 'live')
     assert engine.store.last_close_id() is None
+
+
+def test_reviews_preserve_operator_selected_controls_after_losses(tmp_path):
+    from cst.models import Settlement, OPERATOR_CONTROLS
+    class Suggest:
+        enabled=True
+        model='test'
+        def review(self,*_):
+            return {}, {'min_probability':.99,'entry_window_minutes':1,
+                        'scan_interval_seconds':60,'amount_per_bet':50,
+                        'stop_loss_minutes':1,'exit_probability':.8,'max_spread':.025}, 'Suggested changes'
+    engine=Engine(Settings(data_dir=str(tmp_path),min_probability=.8,entry_window_minutes=5,
+                           stop_loss_minutes=2,exit_probability=.6),
+                  fetcher=lambda _: ([],[]),reviewer=Suggest())
+    before={key:getattr(engine.store.params(),key) for key in OPERATOR_CONTROLS}
+    for _ in range(8):
+        engine.store.add_settlement(Settlement('0.90–0.93',False,.91,.01,-.92))
+    state=engine.run_cycle()
+    assert {key:getattr(engine.store.params(),key) for key in OPERATOR_CONTROLS}==before
+    assert engine.store.params().max_spread==.025
+    assert not set(state['retrospective']['applied']) & set(OPERATOR_CONTROLS)
+    assert state['retrospective']['proposed_updates']['min_probability']==.99
+    assert any('operator-selected min_probability' in n for n in state['retrospective']['notes'])
