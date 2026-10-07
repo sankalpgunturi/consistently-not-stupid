@@ -10,7 +10,7 @@ from cst.venues.kalshi import quotes_from_kalshi_market, _series_fees
 
 
 class MarketWatch:
-    def __init__(self, discover, interval=30):
+    def __init__(self, discover, interval=5):
         self.discover = discover
         self.interval = interval
         self.lock = threading.Condition()

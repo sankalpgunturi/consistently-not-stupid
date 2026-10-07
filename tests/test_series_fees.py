@@ -1,4 +1,5 @@
 from decimal import Decimal
+import pytest
 
 from cst.fees import fee_for
 from cst.strategy import evaluate
@@ -49,3 +50,21 @@ def test_metadata_is_read_once_per_series_and_failures_are_counted():
     assert len(calls) == 2
     assert set(found) == {"KXTEST"}
     assert failures == 1
+
+
+@pytest.mark.parametrize("side,bid", [("yes", "0.80"), ("no", "0.86"), ("yes", "0.89")])
+def test_fee_lookup_includes_candidates_below_ninety_percent(side, bid):
+    calls = []
+
+    class Http:
+        def get_json(self, url):
+            calls.append(url)
+            return {"series": {"fee_type": "quadratic", "fee_multiplier": 1}}
+
+    row = dict(market(), yes_bid_dollars="0.10", no_bid_dollars="0.10")
+    row[f"{side}_bid_dollars"] = bid
+    row[f"{side}_ask_dollars"] = str(float(bid) + .01)
+    found, failures = _series_fees(Http(), "https://example.invalid", [row])
+    assert len(calls) == 1 and failures == 0
+    quote = next(q for q in quotes_from_kalshi_market(row, series=found["KXTEST"]) if q.side == side)
+    assert quote.fee_verified

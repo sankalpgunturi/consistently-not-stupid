@@ -6,7 +6,7 @@ A paper account of $1,000. One process reads public books, decides, and writes a
 
 At a `scan_interval_seconds` target cadence (default one second), `Engine.run_cycle`:
 
-1. Consume a fresh near-resolution quote batch. Background discovery refreshes the bounded market universe every 30 seconds; a separate thread polls current quotes every second in groups of 100 tickers. Multivariate combos are excluded.
+1. Consume a fresh near-resolution quote batch. Background discovery refreshes the bounded market universe on a five-second target (longer when API reads take longer); a separate thread polls current quotes every second in groups of 100 tickers. Multivariate combos are excluded.
 2. Remember which quotes stayed inside the probability band. A favorite has to be stable for `min_stable_scans`.
 3. Record eligible research observations and resolve pending outcomes. `strategy.evaluate` proposes stable quoted favorites that pass probability, fee, expected-outcome timing, size and correlation checks. The ten-minute paper experiment does not require historical evidence or a confidence bound. Research outcomes remain available for daily review. Legacy replay retains its evidence gate. Before each fill, re-read the knobs and book and run admission again.
 4. If `CST_OPENAI_API_KEY` is set, one `POST /v1/decisions` call (`gpt-6-luna`) compares proposed clips with each other and with already-open positions. It may drop only a proposed clip; held positions are context, never exit requests. The chat note may also name drops. Unknown ids are ignored.

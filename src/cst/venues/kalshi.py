@@ -247,7 +247,7 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
 def _series_fees(client: MarketHttp, root: str, markets: list[dict]) -> tuple[dict[str, dict], int]:
     """One metadata read per series with a favorite; never guess an unknown fee."""
     wanted = sorted({str(m.get("ticker") or "").split("-")[0] for m in markets
-                     if max(_num(m.get("yes_bid_dollars")) or 0, _num(m.get("no_bid_dollars")) or 0) >= 0.90})
+                     if max(_num(m.get("yes_bid_dollars")) or 0, _num(m.get("no_bid_dollars")) or 0) >= 0.80})
     found = {}
     errors = 0
     for ticker in wanted:

@@ -495,7 +495,7 @@ class Engine:
         }
         if self._watch:
             from cst.venues.http import BUDGET
-            info["feed"] = {"quote_interval_seconds": 1, "discovery_interval_seconds": 30,
+            info["feed"] = {"quote_interval_seconds": 1, "discovery_interval_seconds": self._watch.interval,
                             "read_requests": BUDGET.requests, "read_rate_cap": BUDGET.rate,
                             "throttles": BUDGET.throttles, "quotes": len(quotes)}
         observations = []
