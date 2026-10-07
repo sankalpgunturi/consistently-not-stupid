@@ -9,7 +9,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FIELDS = {'status', 'operator_pause', 'evidence', 'book', 'last_24h',
     'counts', 'positions', 'trades', 'realized_curve', 'cycle', 'params',
-    'next_scan_at', 'errors', 'llm', 'latest_model_review', 'trade_reviews'}
+    'next_scan_at', 'errors', 'llm', 'latest_model_review', 'trade_reviews', 'market_links'}
 
 
 def public_snapshot(state):

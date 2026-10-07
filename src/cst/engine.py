@@ -753,6 +753,7 @@ class Engine:
             "positions": [item.to_json() for item in positions],
             "trades": [item.to_json() for item in self.store.trades(-1)],
             "trade_reviews": self.store.trade_reviews(),
+            "market_links": self.store.market_links(),
             "equity_curve": self.store.equity_curve(),
             "realized_curve": self.store.realized_curve(),
             "params": param_rows,

@@ -922,6 +922,17 @@ class Store:
                         'context': 'Entry scan review · before execution'}
         return result
 
+    def market_links(self) -> dict:
+        """Use URLs archived from venue quotes, including closed positions."""
+        with self.lock:
+            rows = self.conn.execute("SELECT DISTINCT quote_key, json_extract(payload, '$.url') FROM observations WHERE json_extract(payload, '$.url') IS NOT NULL").fetchall()
+            archived = self.conn.execute("SELECT ticker, json_extract(payload, '$.url') FROM near_observations WHERE ticker IN (SELECT market_id FROM trades)").fetchall()
+            keys = self.conn.execute("SELECT DISTINCT venue, market_id, side FROM trades").fetchall()
+        links = {row[0]: row[1] for row in rows if row[1]}
+        fallback = {row[0]: row[1] for row in archived if row[1]}
+        return {f'{venue}:{market}:{side}': links.get(f'{venue}:{market}:{side}', fallback.get(market))
+                for venue, market, side in keys if links.get(f'{venue}:{market}:{side}', fallback.get(market))}
+
     def paper_started_at(self) -> str:
         with self.lock:
             return str(self._get("paper_started_at") or "")

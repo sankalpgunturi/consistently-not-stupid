@@ -30,8 +30,7 @@ let state = null;
 let lastStamp = "";
 let pendingCommand = null;
 let tradeLimit = 5;
-const tradeDetails = new Map();
-let selectedTrade = null;
+const expandedTrades = new Set();
 const knobDrafts = new Map();
 let knobBusy = false;
 
@@ -59,6 +58,7 @@ function render(next) {
     positions: next.positions,
     trades: next.trades,
     trade_reviews: next.trade_reviews,
+    market_links: next.market_links,
     realized_curve: next.realized_curve,
     focus: next.focus,
     retro: next.latest_model_review,
@@ -197,25 +197,29 @@ function renderTrades(rows, positions = []) {
     const tradeId = entry?.id || position?.id || exit.id;
     const review = state?.trade_reviews?.[entry?.id];
     const reviewText = review?.summary || "No model review recorded for this entry.";
-    tradeDetails.set(tradeId, {title: row.title, html: `
+    const expanded = expandedTrades.has(tradeId);
+    const detailId = `detail-${tradeId}`;
+    const rawUrl = position?.url || state?.market_links?.[`${row.venue}:${row.market_id}:${row.side}`];
+    let marketUrl = '';
+    try { const url = new URL(rawUrl); if (url.protocol === 'https:' && (url.hostname === 'kalshi.com' || url.hostname.endsWith('.kalshi.com'))) marketUrl = url.href; } catch {}
+    const detailHtml = `
       <div class="trade-detail-body">
-        <dl class="trade-facts"><div><dt>Pick</dt><dd>${esc((row.side || '—').toUpperCase())}</dd></div><div><dt>Paid</dt><dd>${esc(paid)}</dd></div><div><dt>Status</dt><dd>${esc(result)}</dd></div></dl>
+
         <div><b>Entry</b><p>${esc(entry?.reason || "Entry explanation unavailable.")}</p></div>
         <div><b>${exit ? 'Outcome' : 'At settlement'}</b><p>${esc(exit?.reason || `${cents(position?.cost_basis || 0)} paid → ${cents(position?.shares || 0)} returned if won; zero if lost.`)}</p></div>
         <div><b>${esc(review?.context || 'Review')}</b><p>${esc(reviewText)}</p>${review?.ts ? `<small>${esc(new Date(review.ts).toLocaleString())}</small>` : ''}</div>
-      </div>`});
-    return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}">
-      <td class="title" data-label="Trade"><button class="trade-toggle" data-trade-toggle="${esc(tradeId)}" aria-haspopup="dialog" aria-controls="trade-drawer">${esc(row.title)}<span aria-hidden="true">↗</span></button></td>
+      </div>`;
+    return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}" tabindex="0" aria-expanded="${expanded}" aria-controls="${esc(detailId)}" aria-label="${esc(row.title)}: trade details">
+      <td class="title" data-label="Trade">${marketUrl ? `<a class="trade-link" href="${esc(marketUrl)}" target="_blank" rel="noopener noreferrer">${esc(row.title)}</a>` : esc(row.title)}</td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
       <td class="trade-result" data-label="Status" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
-      <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<span class="close-estimate">Expected</span>' : ''}</td>
+      <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<sup class="expected-mark" aria-label="expected if won">*</sup>' : ''}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
-      <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<span class="close-estimate">Expected</span>' : ''}</td>
-    </tr>`;
+      <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<sup class="expected-mark" aria-label="expected close">*</sup>' : ''}</td>
+    </tr><tr class="trade-expansion"><td colspan="8"><div id="${esc(detailId)}" class="trade-reveal ${expanded ? 'is-open' : ''}" ${expanded ? '' : 'inert'}><div class="trade-reveal-clip">${detailHtml}</div></div></td></tr>`;
   }).join("");
-  if ($("trade-drawer").open) updateTradeDrawer();
 }
 
 function drawProfit(points) {
@@ -279,32 +283,25 @@ async function post(url, body) {
   return payload;
 }
 
-function updateTradeDrawer() {
-  const detail = tradeDetails.get(selectedTrade);
-  if (!detail) return;
-  $("trade-drawer-title").textContent = detail.title;
-  const body = $("trade-drawer-body");
-  if (body.innerHTML !== detail.html) body.innerHTML = detail.html;
+function toggleTrade(row) {
+  const id = row.dataset.trade;
+  const expanded = !expandedTrades.has(id);
+  if (expanded) expandedTrades.add(id); else expandedTrades.delete(id);
+  row.setAttribute("aria-expanded", String(expanded));
+  const detail = document.getElementById(row.getAttribute("aria-controls"));
+  detail.inert = !expanded;
+  detail.classList.toggle("is-open", expanded);
 }
-
 $("trades").addEventListener("click", event => {
+  if (event.target.closest("a")) return;
   const row = event.target.closest(".trade-row");
-  if (!row) return;
-  selectedTrade = row.dataset.trade;
-  updateTradeDrawer();
-  $("trade-drawer").showModal();
-  document.documentElement.classList.add("drawer-open");
-  $("close-trade-drawer").focus({preventScroll: true});
+  if (row) toggleTrade(row);
 });
-$("close-trade-drawer").addEventListener("click", () => $("trade-drawer").close());
-$("trade-drawer").addEventListener("click", event => {
-  const box = $("trade-drawer").getBoundingClientRect();
-  if (event.target === $("trade-drawer") && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)) $("trade-drawer").close();
-});
-$("trade-drawer").addEventListener("close", () => {
-  document.documentElement.classList.remove("drawer-open");
-  document.querySelector(`[data-trade-toggle="${CSS.escape(selectedTrade || '')}"]`)?.focus({preventScroll: true});
-  selectedTrade = null;
+$("trades").addEventListener("keydown", event => {
+  if (event.target.closest("a")) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest(".trade-row");
+  if (row) { event.preventDefault(); toggleTrade(row); }
 });
 
 $("more-trades").addEventListener("click", () => {

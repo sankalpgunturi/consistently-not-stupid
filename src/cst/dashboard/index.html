@@ -38,9 +38,11 @@
       <article class="card">
         <div class="card-head"><h2>Trades</h2></div>
         <div class="table-wrap"><table class="trade-history">
+          <colgroup><col style="width:36%"><col style="width:6%"><col style="width:12%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:10%"><col style="width:10%"></colgroup>
           <thead><tr><th>Trade</th><th>Pick</th><th>Entry probability</th><th>Paid</th><th>Status</th><th>Profit</th><th>Opened</th><th>Close</th></tr></thead>
           <tbody id="trades"></tbody>
         </table></div>
+        <p class="expected-note">* Expected close / profit if won</p>
         <p class="empty" id="trades-empty">None</p>
         <button type="button" class="more-trades hidden" id="more-trades" aria-label="Show 5 more trades" title="Show more trades"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
       </article>
@@ -52,10 +54,6 @@
     </details>
 
   </main>
-  <dialog id="trade-drawer" class="trade-drawer" aria-labelledby="trade-drawer-title">
-    <header class="drawer-header"><h2 id="trade-drawer-title"></h2><button type="button" id="close-trade-drawer" aria-label="Close trade details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-    <div id="trade-drawer-body"></div>
-  </dialog>
   <footer class="foot"><p>Kalshi paper trading</p></footer>
   <script src="/static/app.js"></script>
 </body>
