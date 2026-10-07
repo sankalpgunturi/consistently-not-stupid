@@ -75,3 +75,18 @@ def test_market_links_repair_archived_event_only_urls(tmp_path):
     quotes = quotes_from_kalshi_market({'ticker':'KXGBPUSD15M-26OCT071330-30',
         'event_ticker':'KXGBPUSD15M-26OCT071330','yes_bid_dollars':'0.95','yes_ask_dollars':'0.96'})
     assert quotes and all(q.url == correct for q in quotes)
+
+
+def test_outcome_window_tightens_without_enabling_legacy_mode():
+    p = make_params(entry_window_minutes=10)
+    q = make_quote(end_time=NOW+timedelta(minutes=9,seconds=30),
+                   expected_resolution_time=NOW+timedelta(minutes=9,seconds=30))
+    b = make_book(streaks={q.key:2})
+    assert tightened_out(q,p,b,now=NOW) is None
+    p.entry_window_minutes = tighten_value(p,'entry_window_minutes')
+    assert p.entry_window_minutes == 9
+    assert 'within the next 9 minutes' in tightened_out(q,p,b,now=NOW)
+    p.entry_window_minutes = 1
+    assert tighten_value(p,'entry_window_minutes') is None
+    p.entry_window_minutes = 0
+    assert tighten_value(p,'entry_window_minutes') is None

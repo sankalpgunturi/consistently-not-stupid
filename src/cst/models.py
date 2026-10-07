@@ -93,6 +93,7 @@ class StrategyParams:
 
 # Rails the retrospective is allowed to move, and the largest step per scan.
 RAILS: dict[str, tuple[float, float]] = {
+    "entry_window_minutes": (1, 10),
     "min_probability": (0.90, 0.97),
     "min_win_profit": (0.005, 0.03),
     "min_edge": (0.005, 0.04),
@@ -112,6 +113,7 @@ RAILS: dict[str, tuple[float, float]] = {
 }
 
 STEPS: dict[str, float] = {
+    "entry_window_minutes": 1,
     "min_probability": 0.01,
     "min_win_profit": 0.002,
     "min_edge": 0.002,
@@ -132,6 +134,7 @@ STEPS: dict[str, float] = {
 
 # Moving the knob this way lets more risk in.
 LOOSEN_UP = frozenset({
+    "entry_window_minutes",
     "max_spread",
     "max_days_to_expiry",
     "max_position_fraction",

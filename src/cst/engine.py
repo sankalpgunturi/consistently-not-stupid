@@ -702,8 +702,9 @@ class Engine:
         if params.entry_window_minutes > 0:
             param_rows.insert(0, {"key": "entry_window_minutes", "label": "Outcome within",
                 "help": "Minutes until the venue expects the outcome; payout may come later.",
-                "value": params.entry_window_minutes, "min": params.entry_window_minutes,
-                "max": params.entry_window_minutes, "adjustable": False})
+                "value": params.entry_window_minutes, "min": 1,
+                "max": 10, "adjustable": True,
+                "next_value": tighten_value(params, "entry_window_minutes")})
         retros = self.store.retros(6)
         research = self.store.research_summary()
         research["calibration"] = [

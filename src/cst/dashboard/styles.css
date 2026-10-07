@@ -440,3 +440,7 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .trade-story .trade-story-pick { color: var(--cream); }
 .trade-story p.good { color: var(--green); }
 .trade-story p.bad { color: var(--red); }
+
+.slider-bounds { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; margin-top: 2px; }
+.knob-setting output { font-size: 1.05rem; }
+.settings-note { color: var(--muted); font-size: .75rem; margin: 16px 0 0; }

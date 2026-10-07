@@ -122,8 +122,9 @@ function renderKnobs(rows) {
     const changed = value !== row.value;
     return `<div class="knob">
       <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.label)}</label>
-      <output id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
-      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="1" step="1" value="${value === Math.min(row.value, row.next_value) ? 0 : 1}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>` : ''}</div>
+      <output aria-live="polite" id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
+      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="1" step="1" value="${value === Math.min(row.value, row.next_value) ? 0 : 1}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>
+      <div class="slider-bounds" aria-hidden="true"><span>${esc(formatKnob({...row,value:Math.min(row.value,row.next_value)}))}</span><span>${esc(formatKnob({...row,value:Math.max(row.value,row.next_value)}))}</span></div>` : ''}</div>
       ${adjustable ? `<button class="mini" data-tighten="${esc(row.key)}" ${!changed || knobBusy || pendingCommand ? 'disabled' : ''}>Apply</button>` : ''}
     </div>`;
   }).join("");
