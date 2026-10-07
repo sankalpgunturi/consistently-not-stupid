@@ -6,34 +6,21 @@ import json
 import secrets
 import sqlite3
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from cst.models import BookView, Decision, Position, Settlement, StrategyParams, Trade, utcnow
+from cst.strategy import price_bucket
+from cst.venues.kalshi import _covers_cutoff, settled_favorite
 
 
 def _iso(dt: datetime | None = None) -> str:
     return (dt or utcnow()).astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
-def _bucket_counts(samples: dict, hours: float, skip: set[str]) -> dict[str, tuple[int, int]]:
-    """Wins and observations for priced samples taken at this horizon."""
-    found: dict[str, list[int]] = {}
-    for ticker, row in samples.items():
-        if str(ticker) in skip or not isinstance(row, dict) or row.get("price") is None:
-            continue
-        try:
-            row_hours = float(row.get("hours"))
-        except (TypeError, ValueError):
-            continue
-        if abs(row_hours - float(hours)) > 1e-6:
-            continue
-        bucket = str(row.get("bucket") or "")
-        if not bucket:
-            continue
-        wins, count = found.get(bucket, [0, 0])
-        found[bucket] = [wins + (1 if row.get("won") else 0), count + 1]
-    return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
+def _hours_key(hours: float) -> float:
+    return round(float(hours), 4)
 
 
 class Store:
@@ -93,12 +80,87 @@ class Store:
                 ts TEXT, actor TEXT, action TEXT,
                 old_value TEXT, new_value TEXT, reason TEXT
             );
+            CREATE TABLE IF NOT EXISTS venue_markets (
+                ticker TEXT PRIMARY KEY,
+                result TEXT NOT NULL,
+                close_ts REAL NOT NULL,
+                volume REAL NOT NULL,
+                covered_until REAL NOT NULL,
+                shallow_ts REAL NOT NULL,
+                exhausted INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS venue_trades (
+                ticker TEXT NOT NULL,
+                trade_key TEXT NOT NULL,
+                traded_at REAL NOT NULL,
+                yes_price REAL NOT NULL,
+                PRIMARY KEY (ticker, trade_key)
+            );
+            CREATE TABLE IF NOT EXISTS venue_samples (
+                ticker TEXT NOT NULL,
+                hours REAL NOT NULL,
+                price REAL,
+                won INTEGER,
+                bucket TEXT,
+                PRIMARY KEY (ticker, hours)
+            );
             """
         )
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(settlements)")}
         if "market_id" not in columns:
             self.conn.execute("ALTER TABLE settlements ADD COLUMN market_id TEXT")
+        self._reconcile_foreign_positions()
         self.conn.commit()
+
+    def _reconcile_foreign_positions(self) -> None:
+        """Close clips from a venue this desk no longer marks.
+
+        Cash returns the cost basis. The fee already paid stays in the fee
+        total. Marking the old model would raise and take the dashboard down.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT * FROM positions
+            WHERE venue != 'kalshi' OR IFNULL(fee_model, '') != 'kalshi'
+            """
+        ).fetchall()
+        for row in rows:
+            cost = float(row["cost_basis"] or 0)
+            cash = round(float(self._get("cash") or 0) + cost, 6)
+            self._put("cash", cash)
+            self.conn.execute(
+                """
+                INSERT INTO trades (
+                    id, ts, venue, market_id, title, outcome, action, shares, price,
+                    fee, pnl, cash_after, signal, reason, won
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    _iso(),
+                    row["venue"],
+                    row["market_id"],
+                    row["title"],
+                    row["outcome"],
+                    "reconcile",
+                    row["shares"],
+                    row["entry_price"],
+                    0,
+                    0,
+                    cash,
+                    row["signal"] or "",
+                    "This venue was removed. The clip was closed at cost and the cash was returned.",
+                    None,
+                ),
+            )
+            self.conn.execute("DELETE FROM positions WHERE id = ?", (row["id"],))
+            self._audit(
+                "migration",
+                "drop-venue",
+                row["venue"],
+                row["market_id"],
+                "This venue was removed. The open clip was closed at cost and the cash was returned.",
+            )
 
     def _seed(self, params: StrategyParams) -> None:
         with self.lock:
@@ -416,62 +478,218 @@ class Store:
             self._put("venue_record", payload)
             self.conn.commit()
 
-    def venue_samples(self) -> dict[str, dict]:
-        with self.lock:
-            raw = self._get("venue_samples") or {}
-        if not isinstance(raw, dict):
-            return {}
-        return {str(ticker): row for ticker, row in raw.items() if isinstance(row, dict)}
-
     def venue_checked(self, hours: float) -> set[str]:
-        """Tickers already read at this horizon. A different horizon is read again."""
-        found: set[str] = set()
-        for ticker, row in self.venue_samples().items():
-            try:
-                row_hours = float(row.get("hours"))
-            except (TypeError, ValueError):
+        """Tickers whose stored trades already answer this horizon."""
+        with self.lock:
+            self._score_covered(hours)
+            rows = self.conn.execute(
+                "SELECT ticker FROM venue_samples WHERE hours = ?",
+                (_hours_key(hours),),
+            ).fetchall()
+        return {str(row["ticker"]) for row in rows}
+
+    def venue_resume(self, hours: float) -> dict[str, float]:
+        """Where to continue a trade read that has not reached this horizon."""
+        cutoff_delta = _hours_key(hours) * 3600
+        found: dict[str, float] = {}
+        with self.lock:
+            rows = self.conn.execute("SELECT * FROM venue_markets").fetchall()
+        for row in rows:
+            cutoff = float(row["close_ts"]) - cutoff_delta
+            if _covers_cutoff(float(row["shallow_ts"]), float(row["covered_until"]), bool(row["exhausted"]), cutoff):
                 continue
-            if abs(row_hours - float(hours)) <= 1e-6:
-                found.add(ticker)
+            found[str(row["ticker"])] = float(row["covered_until"]) - 1
         return found
 
     def add_venue_samples(self, incoming: dict) -> None:
-        """Merge new per-ticker rows. An empty dict leaves an injected record alone."""
+        """Merge trade windows or fixture rows. An empty dict leaves the record alone."""
         if not incoming:
             return
         with self.lock:
-            current = self._get("venue_samples") or {}
-            if not isinstance(current, dict):
-                current = {}
             for ticker, row in incoming.items():
                 if isinstance(row, dict):
-                    current[str(ticker)] = row
-            self._put("venue_samples", current)
+                    self._merge_sample(str(ticker), row)
             hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
-            counts = _bucket_counts(current, hours, set())
-            self._put("venue_record", {bucket: [wins, count] for bucket, (wins, count) in counts.items()})
+            self._score_covered(hours)
+            self._put("venue_record", self._record_payload(hours))
             self.conn.commit()
 
+    def _merge_sample(self, ticker: str, row: dict) -> None:
+        trades = row.get("trades")
+        if isinstance(trades, list):
+            self._merge_trades(ticker, row, trades)
+            return
+        if "hours" not in row:
+            return
+        price = row.get("price")
+        won = 1 if row.get("won") else 0
+        bucket = str(row.get("bucket") or "")
+        if price is None:
+            won = 0
+            bucket = ""
+        self.conn.execute(
+            """
+            INSERT INTO venue_samples (ticker, hours, price, won, bucket)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, hours) DO UPDATE SET
+                price = excluded.price, won = excluded.won, bucket = excluded.bucket
+            """,
+            (ticker, _hours_key(row["hours"]), price, won, bucket),
+        )
+
+    def _merge_trades(self, ticker: str, row: dict, trades: list) -> None:
+        existing = self.conn.execute("SELECT * FROM venue_markets WHERE ticker = ?", (ticker,)).fetchone()
+        shallow = float(row.get("shallow_ts") or 0)
+        covered = float(row.get("covered_until") if row.get("covered_until") is not None else shallow)
+        exhausted = 1 if row.get("exhausted") else 0
+        if existing is not None:
+            shallow = max(shallow, float(existing["shallow_ts"]))
+            covered = min(covered, float(existing["covered_until"]))
+            exhausted = 1 if exhausted or existing["exhausted"] else 0
+        self.conn.execute(
+            """
+            INSERT INTO venue_markets (ticker, result, close_ts, volume, covered_until, shallow_ts, exhausted)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                result = excluded.result,
+                close_ts = excluded.close_ts,
+                volume = excluded.volume,
+                covered_until = excluded.covered_until,
+                shallow_ts = excluded.shallow_ts,
+                exhausted = excluded.exhausted
+            """,
+            (
+                ticker,
+                str(row.get("result") or ""),
+                float(row.get("close_ts") or 0),
+                float(row.get("volume") or 0),
+                covered,
+                shallow,
+                exhausted,
+            ),
+        )
+        for trade in trades:
+            if not isinstance(trade, dict) or trade.get("ts") is None or trade.get("price") is None:
+                continue
+            self.conn.execute(
+                """
+                INSERT INTO venue_trades (ticker, trade_key, traded_at, yes_price)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(ticker, trade_key) DO UPDATE SET
+                    traded_at = excluded.traded_at, yes_price = excluded.yes_price
+                """,
+                (ticker, str(trade.get("key") or trade["ts"]), float(trade["ts"]), float(trade["price"])),
+            )
+        if row.get("reached"):
+            self.conn.execute("DELETE FROM venue_samples WHERE ticker = ?", (ticker,))
+
+    def _score_covered(self, hours: float) -> None:
+        """Fill sample rows for markets whose trades reach this horizon. Caller holds the lock."""
+        hours_key = _hours_key(hours)
+        markets = self.conn.execute("SELECT * FROM venue_markets").fetchall()
+        for market in markets:
+            cutoff = float(market["close_ts"]) - hours_key * 3600
+            if not _covers_cutoff(
+                float(market["shallow_ts"]),
+                float(market["covered_until"]),
+                bool(market["exhausted"]),
+                cutoff,
+            ):
+                continue
+            have = self.conn.execute(
+                "SELECT 1 FROM venue_samples WHERE ticker = ? AND hours = ?",
+                (market["ticker"], hours_key),
+            ).fetchone()
+            if have is not None:
+                continue
+            trades = self.conn.execute(
+                "SELECT traded_at, yes_price FROM venue_trades WHERE ticker = ? ORDER BY traded_at",
+                (market["ticker"],),
+            ).fetchall()
+            price = None
+            best_at = None
+            for trade in trades:
+                stamp = float(trade["traded_at"])
+                if stamp <= cutoff + 1e-6 and (best_at is None or stamp > best_at):
+                    best_at = stamp
+                    price = float(trade["yes_price"])
+            observed = settled_favorite(
+                {"result": market["result"], "volume_fp": market["volume"]},
+                price,
+            )
+            if observed is None:
+                stored_price, won, bucket = None, 0, ""
+            else:
+                stored_price, won_flag = observed
+                won = 1 if won_flag else 0
+                bucket = price_bucket(stored_price)
+            self.conn.execute(
+                """
+                INSERT INTO venue_samples (ticker, hours, price, won, bucket)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(ticker, hours) DO UPDATE SET
+                    price = excluded.price, won = excluded.won, bucket = excluded.bucket
+                """,
+                (market["ticker"], hours_key, stored_price, won, bucket),
+            )
+
+    def _grouped(self, hours: float) -> dict[str, tuple[int, int]]:
+        rows = self.conn.execute(
+            """
+            SELECT bucket, COALESCE(SUM(won), 0), COUNT(*)
+            FROM venue_samples
+            WHERE hours = ? AND price IS NOT NULL AND bucket != ''
+              AND ticker NOT IN (
+                  SELECT market_id FROM settlements
+                  WHERE market_id IS NOT NULL AND market_id != ''
+              )
+            GROUP BY bucket
+            """,
+            (_hours_key(hours),),
+        ).fetchall()
+        return {str(row[0]): (int(row[1]), int(row[2])) for row in rows}
+
+    def _record_payload(self, hours: float) -> dict[str, list[int]]:
+        rows = self.conn.execute(
+            """
+            SELECT bucket, COALESCE(SUM(won), 0), COUNT(*)
+            FROM venue_samples
+            WHERE hours = ? AND price IS NOT NULL AND bucket != ''
+            GROUP BY bucket
+            """,
+            (_hours_key(hours),),
+        ).fetchall()
+        return {str(row[0]): [int(row[1]), int(row[2])] for row in rows}
+
+    def _has_samples(self) -> bool:
+        row = self.conn.execute("SELECT 1 FROM venue_samples LIMIT 1").fetchone()
+        return row is not None
+
     def calibration(self) -> dict[str, tuple[int, int]]:
-        """Pre-close venue samples, plus this desk's own resolutions, each ticker once.
+        """Trades scored at the current horizon, plus this desk's own resolutions.
 
         A ticker we settled is left out of the venue counts and added from our
-        settlement. An injected bucket record is the fallback when no samples
-        have been stored, so a test fixture still opens the gate.
+        settlement. A print counts only when its timestamp clears the horizon.
+        An injected bucket record is the fallback when no samples are stored.
         """
-        samples = self.venue_samples()
-        found: dict[str, list[int]] = {}
-        if samples:
-            hours = float(self.params().min_hours_to_expiry)
-            for bucket, (wins, count) in _bucket_counts(samples, hours, self.settled_market_ids()).items():
-                found[bucket] = [wins, count]
-        else:
-            for bucket, (wins, count) in self.venue_record().items():
-                found[bucket] = [wins, count]
-        for row in self.settlements():
-            wins, count = found.get(row.bucket, [0, 0])
-            found[row.bucket] = [wins + (1 if row.won else 0), count + 1]
-        return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
+        with self.lock:
+            hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
+            self._score_covered(hours)
+            found: dict[str, list[int]] = {}
+            if self._has_samples():
+                for bucket, (wins, count) in self._grouped(hours).items():
+                    found[bucket] = [wins, count]
+            else:
+                raw = self._get("venue_record") or {}
+                if isinstance(raw, dict):
+                    for bucket, pair in raw.items():
+                        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                            found[str(bucket)] = [int(pair[0]), int(pair[1])]
+            rows = self.conn.execute("SELECT bucket, won FROM settlements ORDER BY id ASC").fetchall()
+            for row in rows:
+                wins, count = found.get(row["bucket"], [0, 0])
+                found[row["bucket"]] = [wins + (1 if row["won"] else 0), count + 1]
+            return {bucket: (wins, count) for bucket, (wins, count) in found.items()}
 
     def add_retro(self, payload: dict) -> None:
         with self.lock:
@@ -578,6 +796,7 @@ class Store:
         return self.cash() + sum(item.mark_value for item in positions)
 
     def reset(self, params: StrategyParams) -> None:
+        """Clear this paper book. The venue trade record is kept."""
         with self.lock:
             for table in ("positions", "trades", "decisions", "equity", "retrospectives", "stability", "settlements", "audit", "meta"):
                 self.conn.execute(f"DELETE FROM {table}")

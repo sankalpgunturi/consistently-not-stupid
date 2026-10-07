@@ -140,16 +140,39 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     )
 
 
-def tightened_out(quote: Quote, params: StrategyParams, book: BookView) -> str | None:
+def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: datetime | None = None, already_bought: int = 0) -> str | None:
     """A sentence when a mid-scan tighten means this quote no longer clears.
 
-    The scan reads the knobs once, then the fetch can take long enough for an
-    operator to step them. The fill has to see the new bar and the new edge.
+    The scan reads the knobs once. Before the fill, every admission rule runs
+    again on the current knobs and the current book, including the horizon,
+    the fee, the streak, the caps, and the settled record.
     """
+    now = now or datetime.now(timezone.utc)
     if not quote_in_band(quote, params):
         return "A knob was tightened during this scan, and the quote is no longer at the bar."
+    if _structural(quote, params, now) is not None:
+        return "A knob was tightened during this scan, and the quote no longer clears the structural checks."
+    if book.streaks.get(quote.key, 0) < params.min_stable_scans:
+        return "A knob was tightened during this scan, and the quote has not held still long enough."
     if _learned_signal(quote, params, book) is None:
         return "A knob was tightened during this scan, and the settled record no longer clears the all-in cost."
+    drawdown_hit = book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
+    if quote.key in book.blocked or book.operator_pause or drawdown_hit:
+        return "A knob was tightened during this scan, and the book will not take a new clip."
+    held = {f"{item.venue}:{item.market_id}:{item.side}" for item in book.positions}
+    if quote.key in held or _twin_of(quote, [], book, params):
+        return "A knob was tightened during this scan, and the book already holds this risk."
+    fits, cost, _why = _clip_fits(quote, params, book.equity)
+    if not fits or cost > book.cash + 1e-9:
+        return "A knob was tightened during this scan, and the clip no longer fits the per-trade cap."
+    deployed = sum(item.cost_basis for item in book.positions)
+    if deployed + cost > book.equity * params.max_deployed_fraction + 1e-9:
+        return "A knob was tightened during this scan, and the clip no longer fits the book."
+    category = sum(item.cost_basis for item in book.positions if item.category == quote.category)
+    if category + cost > book.equity * params.max_category_fraction + 1e-9:
+        return "A knob was tightened during this scan, and the clip no longer fits the book."
+    if already_bought >= params.max_new_per_cycle:
+        return "A knob was tightened during this scan, and this scan already has its full set of new buys."
     return None
 
 

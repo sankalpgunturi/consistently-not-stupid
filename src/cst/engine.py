@@ -26,13 +26,19 @@ def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     return quotes, [err] if err else []
 
 
-def default_history(settings: Settings, skip: set[str], hours: float) -> tuple[dict[str, dict] | None, str | None]:
+def default_history(
+    settings: Settings,
+    skip: set[str],
+    hours: float,
+    resume: dict[str, float] | None = None,
+) -> tuple[dict[str, dict] | None, str | None]:
     return fetch_settled_record(
         settings.kalshi_base_url,
         settings.kalshi_pages,
         settings.kalshi_page_size,
         hours,
         skip,
+        resume,
     )
 
 
@@ -191,7 +197,8 @@ class Engine:
                 decisions.append(refusal)
                 continue
             fresh = self.store.params()
-            why = tightened_out(proposal.quote, fresh, book)
+            live = self.store.book(streaks)
+            why = tightened_out(proposal.quote, fresh, live, already_bought=bought)
             if why:
                 decisions.append(Decision(
                     action="skipped",
@@ -325,11 +332,12 @@ class Engine:
             return None
         hours = float(self.store.params().min_hours_to_expiry)
         skip = self.store.venue_checked(hours) | self.store.settled_market_ids()
-        record, err = self.history(self.settings, skip, hours)
+        resume = self.store.venue_resume(hours)
+        record, err = self.history(self.settings, skip, hours, resume)
+        if record:
+            self.store.add_venue_samples(record)
         if err or record is None:
             return err or "Kalshi settled record: no sample."
-        # An empty page is a finished read. It must not wipe a record already stored.
-        self.store.add_venue_samples(record)
         return None
 
     def _refresh(self, venue: str, market_id: str, side: str) -> Quote | None:
@@ -405,12 +413,18 @@ class Engine:
         _updated, _notes, applied = self.store.revise_params(revise)
         if not applied:
             return self.snapshot(), "That knob cannot be tightened."
+        reason = "The operator tightened one step."
+        if key == "min_hours_to_expiry":
+            reason = (
+                "The operator tightened nearest expiry. Stored trades are scored again at the new horizon. "
+                "A trade counts only when it is at least that far before close. Markets that do not reach it are read again."
+            )
         self.store.append_audit(
             "operator",
             "tighten",
             {key: change["old"]},
             {key: change["new"]},
-            "The operator tightened one step.",
+            reason,
         )
         return self.snapshot(), None
 

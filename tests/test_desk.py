@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,7 +20,13 @@ from cst.simulate import run_report
 from cst.store import Store
 from cst.strategy import evaluate, price_bucket, quote_in_band, wilson_lower
 from cst.text import related, same_proposition
-from cst.venues.kalshi import fetch_settled_record, quotes_from_kalshi_market, settled_favorite, yes_price_before_close
+from cst.venues.kalshi import (
+    TRADE_LOOKUPS,
+    fetch_settled_record,
+    quotes_from_kalshi_market,
+    settled_favorite,
+    yes_price_before_close,
+)
 from tests.conftest import NOW, make_book, make_params, make_quote
 
 RECORD = {price_bucket(0.94): (100, 100)}
@@ -158,15 +165,74 @@ def test_a_price_with_time_left_is_a_sample_and_a_last_print_is_not():
     assert samples["KXTEST"]["price"] == 0.94
     assert samples["KXTEST"]["won"] is True
     trade_call = next(params for url, params in http.calls if url.endswith("/markets/trades"))
-    cutoff = int(datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc).timestamp())
-    assert trade_call["max_ts"] == str(cutoff)
-    assert trade_call["limit"] == "1"
+    shallow = int(datetime(2026, 10, 8, 11, 0, tzinfo=timezone.utc).timestamp())
+    assert trade_call["max_ts"] == str(shallow)
+    assert trade_call["limit"] == "100"
     missed, _err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 100, 2, http=_Http([late]))
     assert missed["KXTEST"]["price"] is None
     again, _err = fetch_settled_record(
         "https://kalshi.example/trade-api/v2", 1, 100, 2, skip={"KXTEST"}, http=_Http([early])
     )
     assert again == {}
+
+
+def _settled_market(ticker="KXTEST", **extra):
+    market = {
+        "ticker": ticker,
+        "result": "yes",
+        "volume_fp": "20",
+        "open_time": "2026-10-01T00:00:00Z",
+        "close_time": "2026-10-08T12:00:00Z",
+    }
+    market.update(extra)
+    return market
+
+
+def test_a_missing_field_is_not_pinned_and_cents_still_count():
+    class _Http:
+        def __init__(self):
+            self.trade_calls = 0
+
+        def get_json(self, url, params=None):
+            if url.endswith("/markets"):
+                return {"markets": [_settled_market(volume_fp=""), _settled_market("KXCENT")], "cursor": ""}
+            self.trade_calls += 1
+            return {"trades": [{"yes_price": 94, "created_time": "2026-10-08T09:00:00Z"}]}
+
+        def close(self):
+            pass
+
+    http = _Http()
+    samples, err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 100, 2, http=http)
+    assert err is None
+    assert "KXTEST" not in samples
+    assert samples["KXCENT"]["price"] == 0.94
+    assert http.trade_calls == 1
+
+
+def test_failed_trade_lookups_stop_at_the_cap_and_surface_an_error():
+    class _Http:
+        def __init__(self):
+            self.trade_calls = 0
+
+        def get_json(self, url, params=None):
+            if url.endswith("/markets"):
+                return {
+                    "markets": [_settled_market(f"KX{i}") for i in range(TRADE_LOOKUPS + 5)],
+                    "cursor": "",
+                }
+            self.trade_calls += 1
+            raise RuntimeError("down")
+
+        def close(self):
+            pass
+
+    http = _Http()
+    samples, err = fetch_settled_record("https://kalshi.example/trade-api/v2", 1, 200, 2, http=http)
+    assert samples == {}
+    assert http.trade_calls == TRADE_LOOKUPS
+    assert err is not None
+    assert "failed" in err.lower()
 
 
 def test_one_event_keeps_one_clip():
@@ -837,12 +903,164 @@ def test_a_desk_settlement_is_counted_once(tmp_path):
     assert store.calibration()[bucket] == (1, 2)
 
 
+def test_a_tighter_horizon_rescores_a_trade_only_when_it_reaches(tmp_path):
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    close = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    store.add_venue_samples({
+        "KX1": {
+            "result": "yes",
+            "close_ts": close.timestamp(),
+            "volume": 20,
+            "hours": 2,
+            "shallow_ts": (close - timedelta(hours=1)).timestamp(),
+            "covered_until": (close - timedelta(hours=4)).timestamp(),
+            "exhausted": False,
+            "reached": True,
+            "trades": [
+                {"key": "late", "ts": (close - timedelta(hours=2.5)).timestamp(), "price": 0.94},
+                {"key": "early", "ts": (close - timedelta(hours=4)).timestamp(), "price": 0.91},
+            ],
+        }
+    })
+    near = price_bucket(0.94)
+    far = price_bucket(0.91)
+    assert store.calibration()[near] == (1, 1)
+    params = store.params()
+    params.min_hours_to_expiry = 3
+    store.save_params(params)
+    scored = store.calibration()
+    assert near not in scored
+    assert scored[far] == (1, 1)
+    assert "KX1" in store.venue_checked(3)
+    params.min_hours_to_expiry = 5
+    store.save_params(params)
+    assert far not in store.calibration()
+    assert "KX1" not in store.venue_checked(5)
+
+
+def test_reset_keeps_the_venue_record(tmp_path):
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    bucket = price_bucket(0.94)
+    store.add_venue_samples({"KX1": {"price": 0.94, "won": True, "hours": 2, "bucket": bucket}})
+    store.reset(StrategyParams())
+    assert store.positions() == []
+    assert store.cash() == 1000
+    assert store.calibration()[bucket] == (1, 1)
+
+
+def test_a_polymarket_position_is_closed_at_cost_on_open(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    engine.store.conn.execute("UPDATE meta SET value = ? WHERE key = 'cash'", (json.dumps(900.0),))
+    engine.store.conn.execute(
+        """
+        INSERT INTO positions (
+            id, venue, market_id, event_id, event_title, title, outcome, side, category,
+            shares, entry_price, cost_basis, fees, signal, reason, opened_cycle, bid,
+            end_time, fee_model, fee_rate, fee_exponent, url, opened_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "old", "polymarket", "pm1", "e", "Event", "Old clip", "Yes", "yes", "Other",
+            10, 0.5, 50, 1, "learned", "old", 1, 0.4,
+            "", "polymarket", 0, 1, "", "",
+        ),
+    )
+    engine.store.conn.commit()
+    engine.store.conn.close()
+    reopened = Engine(settings, fetcher=lambda _settings: ([], []))
+    assert reopened.store.positions() == []
+    assert reopened.store.cash() == 950
+    app = create_app(reopened, start_loop=False)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        state = client.get("/api/state")
+        assert state.status_code == 200
+        assert state.json()["book"]["cash"] == 950
+
+
+def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
+    soon = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=2.5))
+    settings = Settings(data_dir=str(tmp_path / "soon"), min_stable_scans=1, bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([soon], []))
+    engine.store.set_venue_record({price_bucket(soon.ask): (100, 100)})
+    engine.depth = _cover
+    engine.decider = lambda _proposals: {}
+
+    class _Hours:
+        enabled = False
+
+        def review(self, *_args):
+            engine.tighten("min_hours_to_expiry")
+            return {}, {}, ""
+
+    engine.reviewer = _Hours()
+    state = engine.run_cycle()
+    assert state["counts"]["bought"] == 0
+    assert state["book"]["cash"] == 1000
+    assert any(row["reason_code"] == "tightened" for row in state["tape"])
+    assert engine.store.params().min_hours_to_expiry == 3
+
+    small = Settings(data_dir=str(tmp_path / "small"), min_stable_scans=1, bankroll=125)
+    clip = make_quote()
+    sized = Engine(small, fetcher=lambda _settings: ([clip], []))
+    sized.store.set_venue_record({price_bucket(clip.ask): (100, 100)})
+    sized.depth = _cover
+    sized.decider = lambda _proposals: {}
+
+    class _Cap:
+        enabled = False
+
+        def review(self, *_args):
+            sized.tighten("max_position_fraction")
+            return {}, {}, ""
+
+    sized.reviewer = _Cap()
+    capped = sized.run_cycle()
+    assert capped["counts"]["bought"] == 0
+    assert capped["book"]["cash"] == 125
+    assert any(row["reason_code"] == "tightened" for row in capped["tape"])
+
+    kept = Settings(data_dir=str(tmp_path / "kept"), min_stable_scans=1, bankroll=1000)
+    quote = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=20))
+    close = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    desk = Engine(kept, fetcher=lambda _settings: ([quote], []))
+    desk.depth = _cover
+    desk.decider = lambda _proposals: {}
+    desk.store.add_venue_samples({
+        f"KX{i}": {
+            "result": "yes",
+            "close_ts": close.timestamp(),
+            "volume": 20,
+            "hours": 2,
+            "shallow_ts": (close - timedelta(hours=1)).timestamp(),
+            "covered_until": (close - timedelta(hours=4)).timestamp(),
+            "exhausted": False,
+            "reached": True,
+            "trades": [{"key": "t", "ts": (close - timedelta(hours=4)).timestamp(), "price": 0.94}],
+        }
+        for i in range(100)
+    })
+
+    class _Still:
+        enabled = False
+
+        def review(self, *_args):
+            desk.tighten("min_hours_to_expiry")
+            return {}, {}, ""
+
+    desk.reviewer = _Still()
+    bought = desk.run_cycle()
+    assert desk.store.params().min_hours_to_expiry == 3
+    assert desk.store.calibration()[price_bucket(0.94)] == (100, 100)
+    assert bought["counts"]["bought"] == 1
+
+
 def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_path):
     quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     bucket = price_bucket(0.94)
 
-    def history(_settings, _skip, hours):
+    def history(_settings, _skip, hours, _resume=None):
         return {
             f"KX{i}": {"price": 0.94, "won": True, "hours": hours, "bucket": bucket}
             for i in range(100)
@@ -856,7 +1074,7 @@ def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_
     assert state["counts"]["bought"] == 1
     assert engine.store.settlements() == []
     assert engine.store.venue_record()[bucket] == (100, 100)
-    engine.history = lambda _settings, _skip, _hours: (None, "Kalshi settled record: down")
+    engine.history = lambda _settings, _skip, _hours, _resume=None: (None, "Kalshi settled record: down")
     engine.fetcher = lambda _settings: ([], [])
     again = engine.run_cycle()
     assert engine.store.venue_record()[bucket] == (100, 100)

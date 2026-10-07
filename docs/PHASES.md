@@ -97,3 +97,7 @@ Status: done. The entry sample is the first pages of settled Kalshi markets, plu
 ## Phase 9 — The sample matches the gate
 
 Status: done. The gate asks whether a favorite quoted with at least `min_hours_to_expiry` still to run usually won. The seed is the latest trade at least that far before close. A final print is not a sample, and a market with no such trade is stored as checked and left out of the counts. Each scan reads at most 40 of those trades; the rest wait. A ticker this desk has settled is counted once, from the desk's own settlement. A settled market whose bid and ask are missing still marks a held clip from `result`. The Wilson gate is unchanged, and a bucket under 30 observations stays in cash.
+
+## Phase 10 — The record survives a tighter horizon
+
+Status: done. Trade prints are stored from the one-hour rail back through the current horizon, and a tighten scores those prints again. A trade counts at the new horizon only when its timestamp still clears it. Pagination walks back until the cutoff, so a single page of recent trades is not treated as coverage. A missing field is not pinned. A failed trade read counts toward the 40-attempt cap and the scan says so. Reset clears the paper book and keeps the venue prints. An older Polymarket clip is closed at cost on open, so the dashboard can still mark the book. A fill re-checks the horizon, the fee, the streak, the caps, and the current record before cash moves.

@@ -392,7 +392,7 @@ $("pause").addEventListener("click", () => {
 });
 
 $("reset").addEventListener("click", async () => {
-  if (!confirm("Reset the paper book to the starting cash? The tape, the open trades, and the audit will be cleared.")) return;
+  if (!confirm("Reset the paper book to the starting cash? The tape, the open trades, and the audit will be cleared. The settled record is kept.")) return;
   await post("/api/reset");
 });
 

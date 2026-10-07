@@ -16,8 +16,12 @@ from cst.venues.http import MarketHttp
 
 log = logging.getLogger("cst.kalshi")
 
-# Trade lookups per scan. The market list is cheap; each early trade is its own read.
+# Trade lookups per scan. Each attempt counts, including a timeout.
 TRADE_LOOKUPS = 40
+# One page. Pagination continues until the trades reach the horizon cutoff.
+TRADE_PAGE = 100
+# Shallowest nearest-expiry the desk can ask for. Reads start here.
+RAIL_HOURS = 1.0
 
 _CATEGORIES = (
     ("KXNBA", "Basketball"),
@@ -217,6 +221,17 @@ def _close_time(market: dict) -> datetime | None:
     return _dt(market.get("close_time") or market.get("expected_expiration_time"))
 
 
+def _yes_price(trade: dict) -> float | None:
+    """Yes price in dollars. The cents field is the fallback when dollars are absent."""
+    dollars = _num(trade.get("yes_price_dollars"))
+    if dollars is not None:
+        return dollars
+    cents = _num(trade.get("yes_price"))
+    if cents is None:
+        return None
+    return cents / 100
+
+
 def yes_price_before_close(market: dict, trades: list, hours: float) -> float | None:
     """Latest yes trade at least ``hours`` before close.
 
@@ -233,7 +248,7 @@ def yes_price_before_close(market: dict, trades: list, hours: float) -> float | 
         if not isinstance(trade, dict):
             continue
         traded_at = _dt(trade.get("created_time"))
-        price = _num(trade.get("yes_price_dollars"))
+        price = _yes_price(trade)
         if traded_at is None or price is None or traded_at > cutoff:
             continue
         if best_at is None or traded_at > best_at:
@@ -271,8 +286,22 @@ def settled_favorite(market: dict, yes_price: float | None) -> tuple[float, bool
 
 def _sample_row(price: float | None, won: bool, hours: float) -> dict:
     if price is None:
-        return {"price": None, "hours": hours}
+        return {"price": None, "won": False, "hours": hours, "bucket": ""}
     return {"price": price, "won": won, "hours": hours, "bucket": price_bucket(price)}
+
+
+def _covers_cutoff(shallow_ts: float, covered_until: float, exhausted: bool, cutoff: float) -> bool:
+    """True when stored trades can name the latest print at or before ``cutoff``.
+
+    A walk from ``shallow_ts`` back to ``covered_until`` answers every cutoff
+    in between. An exhausted walk answers every earlier cutoff too. A trade
+    that only clears two hours does not answer a three-hour cutoff.
+    """
+    if cutoff > shallow_ts + 1e-6:
+        return False
+    if exhausted:
+        return True
+    return covered_until <= cutoff + 1e-6
 
 
 def _needs_trade(market: dict, hours: float) -> bool:
@@ -294,26 +323,132 @@ def _needs_trade(market: dict, hours: float) -> bool:
     return True
 
 
+def _history_error(failures: int, unreadable: int) -> str | None:
+    parts = []
+    if failures:
+        parts.append(f"{failures} trade lookup{'s' if failures != 1 else ''} failed")
+    if unreadable:
+        parts.append(f"{unreadable} trade read{'s' if unreadable != 1 else ''} had no price")
+    if not parts:
+        return None
+    return "Kalshi settled record: " + ", and ".join(parts) + "."
+
+
+def _read_trades(
+    client: MarketHttp,
+    root: str,
+    ticker: str,
+    shallow_ts: float,
+    deep_ts: float,
+    resume_ts: float | None,
+    budget: dict,
+) -> dict | None:
+    """Page trades until they reach ``deep_ts``, the list ends, or the budget does.
+
+    A returned dict is safe to store. ``None`` means this ticker must be tried
+    again: the call failed, or the payload had trades with no readable price.
+    ``budget['stop']`` is set when the per-scan cap is used up.
+    """
+    max_ts = int(resume_ts if resume_ts is not None else shallow_ts)
+    cursor = ""
+    collected: list[dict] = []
+    oldest: float | None = None
+    exhausted = False
+    reached = False
+    while True:
+        if budget["lookups"] >= TRADE_LOOKUPS:
+            budget["stop"] = True
+            break
+        budget["lookups"] += 1
+        params = {"ticker": ticker, "limit": str(TRADE_PAGE), "max_ts": str(max_ts)}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            payload = client.get_json(f"{root}/markets/trades", params=params)
+        except Exception as exc:
+            log.warning("kalshi trades %s failed: %s", ticker, exc)
+            budget["failures"] += 1
+            return None
+        trades = payload.get("trades") if isinstance(payload, dict) else None
+        if not isinstance(trades, list):
+            budget["failures"] += 1
+            return None
+        if not trades:
+            exhausted = True
+            break
+        readable = 0
+        page_oldest: float | None = None
+        for trade in trades:
+            if not isinstance(trade, dict):
+                continue
+            traded_at = _dt(trade.get("created_time"))
+            price = _yes_price(trade)
+            if traded_at is None:
+                continue
+            stamp = traded_at.timestamp()
+            if page_oldest is None or stamp < page_oldest:
+                page_oldest = stamp
+            if price is None:
+                continue
+            readable += 1
+            trade_id = str(trade.get("trade_id") or "")
+            collected.append({
+                "key": trade_id or f"{stamp:.6f}:{price:.4f}",
+                "ts": stamp,
+                "price": price,
+            })
+        if readable == 0:
+            budget["unreadable"] += 1
+            return None
+        if page_oldest is not None:
+            oldest = page_oldest if oldest is None else min(oldest, page_oldest)
+        if oldest is not None and oldest <= deep_ts + 1e-6:
+            reached = True
+            break
+        cursor = str(payload.get("cursor") or "") if isinstance(payload, dict) else ""
+        if cursor:
+            continue
+        if len(trades) < TRADE_PAGE:
+            exhausted = True
+            break
+        if oldest is None:
+            budget["unreadable"] += 1
+            return None
+        max_ts = int(oldest) - 1
+    if not collected and not exhausted:
+        return None
+    covered_until = oldest if oldest is not None else shallow_ts
+    return {
+        "trades": collected,
+        "shallow_ts": shallow_ts,
+        "covered_until": covered_until,
+        "exhausted": exhausted,
+        "reached": reached or exhausted,
+    }
+
+
 def fetch_settled_record(
     base_url: str,
     pages: int,
     page_size: int,
     hours: float,
     skip: set[str] | None = None,
+    resume: dict[str, float] | None = None,
     http: MarketHttp | None = None,
 ) -> tuple[dict[str, dict] | None, str | None]:
-    """New per-ticker samples from settled markets.
+    """New per-ticker trade windows from settled markets.
 
-    The price is the latest trade at least ``hours`` before close. Markets
-    with no such trade are stored with a null price so the next scan does not
-    read them again. ``None`` for the whole payload means the market list
-    failed and the caller should keep the previous sample. Trade lookups are
-    capped; the rest wait for a later scan.
+    Reads start at the one-hour rail and page backward until the trades reach
+    the current horizon. The caller stores the prints and scores whatever
+    horizon is in force. A market that fails a field check is left unstored.
+    A null sample is returned only after a lookup that found no trade before
+    the cutoff. ``None`` for the whole payload means the market list failed.
     """
     own = http is None
     client = http or MarketHttp()
     root = base_url.rstrip("/")
     seen = skip or set()
+    resume = resume or {}
     markets: list[dict] = []
     try:
         cursor = ""
@@ -335,39 +470,64 @@ def fetch_settled_record(
             client.close()
         return None, f"Kalshi settled record: {exc}"
     samples: dict[str, dict] = {}
-    lookups = 0
+    budget = {"lookups": 0, "failures": 0, "unreadable": 0, "stop": False}
     try:
         for market in markets:
+            if budget["stop"]:
+                break
             ticker = str(market.get("ticker") or "")
             if not ticker or ticker in seen or ticker in samples:
                 continue
             if not _needs_trade(market, hours):
-                samples[ticker] = _sample_row(None, False, hours)
                 continue
-            if lookups >= TRADE_LOOKUPS:
-                break
             close = _close_time(market)
             if close is None:
                 continue
-            cutoff = int((close - timedelta(hours=hours)).timestamp())
-            try:
-                payload = client.get_json(
-                    f"{root}/markets/trades",
-                    params={"ticker": ticker, "limit": "1", "max_ts": str(cutoff)},
-                )
-            except Exception as exc:
-                log.warning("kalshi trades %s failed: %s", ticker, exc)
+            close_ts = close.timestamp()
+            shallow_ts = (close - timedelta(hours=min(hours, RAIL_HOURS))).timestamp()
+            deep_ts = (close - timedelta(hours=hours)).timestamp()
+            window = _read_trades(
+                client,
+                root,
+                ticker,
+                shallow_ts,
+                deep_ts,
+                resume.get(ticker),
+                budget,
+            )
+            if window is None or not window["reached"]:
+                if window and window["trades"]:
+                    samples[ticker] = {
+                        "result": str(market.get("result") or "").lower(),
+                        "close_ts": close_ts,
+                        "volume": _num(market.get("volume_fp")) or 0.0,
+                        "hours": hours,
+                        "shallow_ts": window["shallow_ts"],
+                        "covered_until": window["covered_until"],
+                        "exhausted": False,
+                        "trades": window["trades"],
+                        "reached": False,
+                    }
                 continue
-            lookups += 1
-            trades = payload.get("trades") if isinstance(payload, dict) else None
-            yes_price = yes_price_before_close(market, trades or [], hours)
+            yes_price = yes_price_before_close(
+                market,
+                [{"created_time": datetime.fromtimestamp(item["ts"], timezone.utc).isoformat(), "yes_price_dollars": item["price"]} for item in window["trades"]],
+                hours,
+            )
             observed = settled_favorite(market, yes_price)
-            if observed is None:
-                samples[ticker] = _sample_row(None, False, hours)
-            else:
-                price, won = observed
-                samples[ticker] = _sample_row(price, won, hours)
-        return samples, None
+            row = _sample_row(None if observed is None else observed[0], False if observed is None else observed[1], hours)
+            row.update({
+                "result": str(market.get("result") or "").lower(),
+                "close_ts": close_ts,
+                "volume": _num(market.get("volume_fp")) or 0.0,
+                "shallow_ts": window["shallow_ts"],
+                "covered_until": window["covered_until"],
+                "exhausted": bool(window["exhausted"]),
+                "trades": window["trades"],
+                "reached": True,
+            })
+            samples[ticker] = row
+        return samples, _history_error(budget["failures"], budget["unreadable"])
     finally:
         if own:
             client.close()
