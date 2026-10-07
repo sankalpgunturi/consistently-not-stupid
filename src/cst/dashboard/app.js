@@ -34,20 +34,46 @@ const expandedTrades = new Set();
 const knobDrafts = new Map();
 let knobBusy = false;
 let knobRenderStamp = "";
+let liveAwaiting = false;
 
 function render(next) {
   state = next;
   if (pendingCommand && next.last_command?.id === pendingCommand) {
     pendingCommand = null;
     lastStamp = "";
-    if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
+    if (liveAwaiting) {
+      liveAwaiting = false;
+      const approve = $("live-approve");
+      if (approve) approve.disabled = false;
+      if (!next.last_command.ok) showLiveError(next.last_command.error || "The desk refused that change.");
+      else $("live-dialog").close();
+    } else if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
   }
   const book = next.book || {};
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
   $("pause").textContent = next.operator_pause ? "Resume buys" : "Pause buys";
+  const liveButton = $("live");
+  if (next.mode === "live") {
+    liveButton.disabled = true;
+    liveButton.textContent = `Live · ${money(next.live_budget || 0, 0)}`;
+    liveButton.title = "Live trading is on for this amount.";
+  } else {
+    liveButton.disabled = false;
+    liveButton.textContent = "Switch to live trading";
+    liveButton.title = "Place real Kalshi orders up to an amount you approve.";
+  }
+  const modeNote = $("mode-note");
+  if (modeNote) {
+    modeNote.textContent = next.mode === "live"
+      ? `Kalshi live trading · ${money(next.live_budget || 0, 0)} approved`
+      : "Kalshi paper trading";
+  }
   const stamp = JSON.stringify({
     status: next.status,
     operator_pause: next.operator_pause,
+    mode: next.mode,
+    live_budget: next.live_budget,
+    live_exchange_balance: next.live_exchange_balance,
     paper_age_days: next.paper_age_days,
     evidence: next.evidence,
     book,
@@ -89,6 +115,10 @@ function render(next) {
   const messages = [];
   if (book.drawdown_pause) messages.push("New buys are paused. The book is under its peak by the pause line. Exits still run.");
   if (next.operator_pause) messages.push("New buys are paused by you. Exits still run.");
+  if (next.mode === "live" && Number.isFinite(Number(next.live_exchange_balance))
+      && Number(next.live_exchange_balance) + 1e-9 < Number(next.live_budget)) {
+    messages.push(`Kalshi balance is ${money(next.live_exchange_balance)}. Buys stop at the smaller of that and the ${money(next.live_budget, 0)} you approved.`);
+  }
   (next.errors || []).forEach((item) => messages.push(item));
   ((next.evidence || {}).errors || []).forEach((item) => {
     if (!messages.includes(item)) messages.push(item);
@@ -102,7 +132,7 @@ function render(next) {
 
   const counts = next.counts || {};
   $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
-    book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
+    book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : next.mode === "live" ? "Live" : "Running";
 
   drawProfit(next.realized_curve || []);
   renderKnobs(next.params || []);
@@ -335,6 +365,74 @@ $("more-trades").addEventListener("click", () => {
 
 $("pause").addEventListener("click", () => {
   post("/api/pause", { paused: !state?.operator_pause });
+});
+
+function showLiveError(message) {
+  const error = $("live-error");
+  if (error) error.textContent = message || "";
+}
+
+function liveAmount() {
+  const raw = $("live-amount").value.trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const amount = Number(raw);
+  if (amount < 1 || amount > 5000) return null;
+  return amount;
+}
+
+$("live").addEventListener("click", () => {
+  if (state?.mode === "live") return;
+  $("live-amount").value = "1";
+  showLiveError("");
+  $("live-dialog").showModal();
+  $("live-amount").focus();
+  $("live-amount").select();
+});
+
+$("live-cancel").addEventListener("click", () => {
+  $("live-dialog").close();
+});
+
+$("live-amount").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    $("live-approve").click();
+  }
+});
+
+$("live-approve").addEventListener("click", async () => {
+  const amount = liveAmount();
+  if (amount === null) {
+    showLiveError("Enter a whole dollar amount from $1 to $5,000.");
+    return;
+  }
+  const approve = $("live-approve");
+  approve.disabled = true;
+  showLiveError("");
+  try {
+    const response = await fetch("/api/live", {
+      method: "POST",
+      headers: { "X-CSRF-Token": state?.csrf || "", "Content-Type": "application/json" },
+      body: JSON.stringify({ amount }),
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_err) { payload = null; }
+    if (response.status === 202) {
+      pendingCommand = payload?.id || null;
+      liveAwaiting = true;
+      showLiveError("Waiting for the desk.");
+      return;
+    }
+    if (!response.ok) {
+      showLiveError(payload?.error || "The desk refused that change.");
+      if (payload?.state) render(payload.state);
+      return;
+    }
+    if (payload) render(payload);
+    $("live-dialog").close();
+  } finally {
+    if (!liveAwaiting) approve.disabled = false;
+  }
 });
 
 document.body.addEventListener("click", async (event) => {

@@ -9,7 +9,8 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FIELDS = {'status', 'operator_pause', 'evidence', 'book', 'last_24h',
     'counts', 'positions', 'trades', 'realized_curve', 'cycle', 'params',
-    'next_scan_at', 'errors', 'llm', 'latest_model_review', 'trade_reviews', 'market_links'}
+    'next_scan_at', 'errors', 'llm', 'latest_model_review', 'trade_reviews', 'market_links',
+    'mode', 'live', 'live_budget', 'live_exchange_balance'}
 
 
 def public_snapshot(state):
@@ -33,16 +34,25 @@ def main():
                 response = client.get(config['url'].rstrip('/') + '/internal/commands', headers=authorization)
                 response.raise_for_status()
                 for command in response.json().get('commands', []):
-                    if command['action'] not in {'pause', 'scan', 'reset', 'block', 'knob', 'close'}:
+                    if command['action'] not in {'pause', 'scan', 'reset', 'block', 'knob', 'close', 'live'}:
                         continue
                     current = client.get('http://127.0.0.1:8000/api/state')
                     current.raise_for_status()
                     execution = client.post('http://127.0.0.1:8000/api/' + command['action'],
                         headers={'X-CSRF-Token': current.json()['csrf'], 'X-Command-Id': command['id']},
                         json=command['body'], timeout=60)
+                    detail = None
+                    if not execution.is_success:
+                        try:
+                            detail = execution.json().get('error')
+                        except Exception:
+                            detail = None
+                        if not isinstance(detail, str) or not detail.strip():
+                            detail = 'Command failed; try again.'
+                        detail = detail[:300]
                     ack = client.post(config['url'].rstrip('/') + '/internal/ack', headers=authorization,
                         json={'id': command['id'], 'action': command['action'], 'ok': execution.is_success,
-                              'error': None if execution.is_success else 'Command failed; try again.'})
+                              'error': detail})
                     ack.raise_for_status()
             except Exception as exc:
                 # Do not log request headers or payloads.

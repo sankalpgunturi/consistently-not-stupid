@@ -16,7 +16,7 @@
       <h1>Consistently Not Stupid</h1>
     </div>
     <div class="top-meta">
-      <button type="button" id="live" class="btn ghost" disabled title="Live order execution is not implemented">Switch to live trading</button>
+      <button type="button" id="live" class="btn" title="Place real Kalshi orders up to an amount you approve">Switch to live trading</button>
       <button type="button" id="pause" class="btn ghost">Pause buys</button>
     </div>
   </header>
@@ -54,7 +54,22 @@
     </details>
 
   </main>
-  <footer class="foot"><p>Kalshi paper trading</p><p class="expected-note">* Expected close / profit if won</p></footer>
+  <footer class="foot"><p id="mode-note">Kalshi paper trading</p><p class="expected-note">* Expected close / profit if won</p></footer>
+  <dialog id="live-dialog" aria-labelledby="live-title">
+    <h2 id="live-title">Switch to live trading?</h2>
+    <p class="live-warning">This places real Kalshi orders with real money, starting now. The desk will not spend more than this amount, or more than the cash in the Kalshi account.</p>
+    <label for="live-amount">Amount in dollars</label>
+    <div class="amount-field">
+      <span aria-hidden="true">$</span>
+      <input id="live-amount" type="text" inputmode="numeric" autocomplete="off" min="1" max="5000" value="1" aria-describedby="live-hint live-error" />
+    </div>
+    <p id="live-hint" class="amount-hint">Whole dollars, from $1 to $5,000.</p>
+    <p id="live-error" class="live-error" role="alert"></p>
+    <div class="dialog-actions">
+      <button type="button" id="live-cancel" class="btn ghost">Cancel</button>
+      <button type="button" id="live-approve" class="btn">Approve</button>
+    </div>
+  </dialog>
   <script src="/static/app.js"></script>
 </body>
 </html>

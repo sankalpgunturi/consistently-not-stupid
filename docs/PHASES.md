@@ -107,3 +107,7 @@ Status: done. Trade prints are stored from the one-hour rail back through the cu
 Separated 30-second bounded discovery from a background one-second quote monitor. Current quotes are fetched in groups of 100 tickers; failed, duplicate and stale snapshots cannot manufacture another stable observation. All public Kalshi clients share paced reads, exponential 429 backoff and gradual rate recovery. The engine targets one-second evaluations without catch-up bursts; model vetoes and execution checks can still take longer. Existing paper capital and history are preserved.
 
 The dashboard combines open and completed bets in one table, removes manual-close controls and the chart's start caption, and uses labeled trade cards on small screens. A permanent Cloudflare Worker URL mirrors the live account and relays the same controls without sign-in, as requested. The trading engine remains on the Mac. Publication excludes local CSRF tokens; remote commands require origin/CSRF checks and use persistent local IDs to prevent replay.
+
+## Live amount switch
+
+The switch-to-live button asks for a whole-dollar amount from $1 to $5,000 and, on approve, turns live trading on for that cap. The key id and private-key path come from `.env` on the machine running the desk. Paper fills stay simulated until that approval.

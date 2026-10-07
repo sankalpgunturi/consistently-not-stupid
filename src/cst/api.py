@@ -2,7 +2,8 @@
 
 Mutating routes require the token from GET /api/state. Origin and Host have
 to be localhost or the host the desk was bound to, including the state read
-and the snapshot socket. There is no login and no route that sends an order.
+and the snapshot socket. There is no login. Live orders are sent only after
+POST /api/live approves a whole-dollar amount from $1 to $5,000.
 """
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ class CloseIn(BaseModel):
 
 class KnobIn(BaseModel):
     key: str
+
+
+class LiveIn(BaseModel):
+    amount: float
 
 
 def _hostname(value: str | None) -> str:
@@ -160,7 +165,13 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "mode": "paper", "live": "unavailable", "name": "Consistently Not Stupid"}
+        mode = engine.store.trading_mode()
+        return {
+            "ok": True,
+            "mode": mode,
+            "live": "on" if mode == "live" else "unavailable",
+            "name": "Consistently Not Stupid",
+        }
 
     @app.get("/api/state")
     def state():
@@ -175,7 +186,16 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
 
     @app.post("/api/reset")
     def reset():
+        if engine.store.trading_mode() == "live":
+            return JSONResponse({"error": "Reset stays off while live trading is on."}, status_code=409)
         return engine.reset()
+
+    @app.post("/api/live")
+    def live(body: LiveIn):
+        state, error = engine.arm_live(body.amount)
+        if error:
+            return JSONResponse({"error": error, "state": state}, status_code=400)
+        return state
 
     @app.post("/api/pause")
     def pause(body: PauseIn):

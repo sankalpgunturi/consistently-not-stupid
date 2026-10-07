@@ -1,6 +1,6 @@
 # Architecture
 
-A paper account of $1,000. One process reads public books, decides, and writes a sqlite file. The dashboard is a human view of that file, plus a few tighten-only overrides. Nothing in this process signs or posts an order.
+A paper account of $1,000. One process reads public books, decides, and writes a sqlite file. The dashboard is a human view of that file, plus a few tighten-only overrides. Signed orders start only after the operator approves a live amount from $1 to $5,000.
 
 ## Loop
 
@@ -37,11 +37,11 @@ At a `scan_interval_seconds` target cadence (default one second), `Engine.run_cy
 
 The page can pause new buys, block a market key, close a paper clip, and tighten one risk knob. The server computes the tighter value. The client does not send a new number. Close and stop both go through the depth check. Reset is the only way to clear `paper_started_at`.
 
-`POST /api/*` requires header `X-CSRF-Token` equal to the token on `GET /api/state`. A foreign `Origin` is rejected. The server binds to `127.0.0.1`. There is no login and no arm control. The snapshot says `mode: paper` and `live: unavailable`.
+`POST /api/*` requires header `X-CSRF-Token` equal to the token on `GET /api/state`. A foreign `Origin` is rejected. The server binds to `127.0.0.1`. There is no login. The snapshot says `mode: paper` and `live: unavailable` until `POST /api/live` approves $1 to $5,000. That route checks the Kalshi key, then new buys are fill-or-kill orders capped by the approved amount and the Kalshi balance.
 
 ## What this is not
 
-No matching engine, no colocation, no second strategy, no per-market model call, no model-originated buys, no live signing. Inventory caps, the pause, executable size, fees and refreshed marks constrain paper execution. The ten-minute limit applies to the expected outcome; quote monitoring targets one second. Model review and API latency can delay actual admission; cycles never overlap or run catch-up bursts.
+No matching engine, no colocation, no second strategy, no per-market model call, no model-originated buys. Inventory caps, the pause, executable size, fees and refreshed marks constrain execution. Live orders use the same gates and the approved dollar cap. The ten-minute limit applies to the expected outcome; quote monitoring targets one second. Model review and API latency can delay actual admission; cycles never overlap or run catch-up bursts.
 
 ## Ten-minute paper strategy (October 7 clarification)
 
