@@ -156,7 +156,7 @@ LOOSEN_DOWN = frozenset({
 })
 
 PARAM_COPY: dict[str, tuple[str, str]] = {
-    "min_probability": ("Minimum probability", "Bid and ask both have to clear this."),
+    "min_probability": ("Entry probability", "Bid and ask both have to clear this."),
     "min_win_profit": ("Profit if it wins", "Cents per share that must remain after the fee."),
     "min_edge": ("Minimum edge", "How far the settled record has to sit above our all-in cost."),
     "max_spread": ("Maximum spread", "Wider books are not a probability, they are a guess."),
