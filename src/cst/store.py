@@ -823,7 +823,20 @@ class Store:
             observations = self.conn.execute("SELECT COUNT(*), COUNT(DISTINCT quote_key) FROM observations").fetchone()
             rows = self.conn.execute("SELECT ts, payload FROM scans ORDER BY cycle DESC LIMIT 12").fetchall()
             near = self.conn.execute("SELECT COUNT(*), SUM(CASE WHEN result IN ('yes','no') THEN 1 ELSE 0 END), SUM(CASE WHEN result IN ('yes','no') AND side != result THEN 1 ELSE 0 END) FROM near_observations").fetchone()
-        return {"near_resolution": {"observed_events": near[0], "resolved_events": near[1] or 0, "losing_outcomes": near[2] or 0}, "scans_recorded": scans, "observations": observations[0], "distinct_contract_sides": observations[1],
+            buckets = self.conn.execute(
+                "SELECT bucket, COUNT(*), SUM(side=result), SUM(price+fee) "
+                "FROM near_observations WHERE result IN ('yes','no') GROUP BY bucket"
+            ).fetchall()
+        cost = sum(row[3] for row in buckets)
+        payout = sum(row[2] for row in buckets)
+        quote_reference = {
+            "cost": round(cost, 6), "payout": payout,
+            "net_payoff": round(payout-cost, 6) if buckets else None,
+            "buckets": {row[0]: {"resolved": row[1], "wins": row[2], "net_payoff": round(row[2]-row[3], 6)} for row in buckets},
+            "note": "Research only, not fills or ledger profit. One contract per resolved observation at its saved ask plus fee, held to official outcome. Excludes executable depth, portfolio vetoes, stops, slippage and API costs; events may correlate. Pending observations are excluded.",
+        }
+        return {"near_resolution": {"observed_events": near[0], "resolved_events": near[1] or 0, "losing_outcomes": near[2] or 0,
+                                    "quote_reference": quote_reference}, "scans_recorded": scans, "observations": observations[0], "distinct_contract_sides": observations[1],
                 "recent_scans": [dict(json.loads(row["payload"]), ts=row["ts"]) for row in rows]}
 
     def retros(self, limit: int = 8) -> list[dict]:

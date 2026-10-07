@@ -64,6 +64,33 @@ def test_unknown_or_failed_outcomes_do_not_become_wins(tmp_path):
     row=store.conn.execute('SELECT * FROM near_observations').fetchone()
     assert row['resolved_at'] is None
     assert row['checked_at'] is not None
+    assert store.research_summary()['near_resolution']['quote_reference']['net_payoff'] is None
+
+
+def test_research_payoff_includes_losses_and_fees_but_not_pending_or_cash(tmp_path):
+    p = StrategyParams(entry_window_minutes=10)
+    store = Store(tmp_path/'book.sqlite', p, 1000)
+    quotes = [make_quote(market_id=f'm{i}', event_id=f'e{i}', bid=price-.01, ask=price,
+                         expected_resolution_time=NOW+timedelta(minutes=5))
+              for i, price in enumerate((.91, .94, .97))]
+    class Http:
+        def get_json(self, *args, **kwargs):
+            return {'markets': [{'ticker': 'm0', 'result': 'no'},
+                                {'ticker': 'm1', 'result': 'yes'},
+                                {'ticker': 'm2', 'result': ''}]}
+    observe_and_resolve(store, Settings(), quotes, p, NOW, http=Http())
+    summary = store.research_summary()['near_resolution']
+    assert summary['observed_events'] == 3
+    assert summary['resolved_events'] == 2
+    reference = summary['quote_reference']
+    assert reference['cost'] == 1.87
+    assert reference['payout'] == 1
+    assert reference['net_payoff'] == -.87
+    assert reference['buckets']['0.90–0.93']['net_payoff'] == -.92
+    assert reference['buckets']['0.93–0.96']['net_payoff'] == .05
+    assert '0.96–0.99' not in reference['buckets']
+    assert store.cash() == 1000
+    assert store.trades() == []
 
 
 def test_near_engine_records_without_crediting_research_or_using_old_history(tmp_path):
