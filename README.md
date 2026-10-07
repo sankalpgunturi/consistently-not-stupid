@@ -38,7 +38,7 @@ Open http://127.0.0.1:8000.
 
 For continuous operation on this Mac, run `.venv/bin/python tools/paper_service.py install`. The macOS service starts at login, restarts after a crash, and prevents idle sleep while running. It reads `.env` from this checkout. Keep the Mac powered, awake, and connected; closing a laptop lid or shutting it down can interrupt the run. Use `status`, `restart`, or `stop` in place of `install` to manage the service. A restart loads code changes without resetting the account.
 
-The runner scans every ten minutes and marks open positions every minute. Its log is `data/logs/runner.log`; the account and research record live in `data/book.sqlite`. Scans retain settings, calibration, counts, refusals, equity, and favorite quote observations. Trade records contain fills, fees, exits, and settlements. Retrospectives retain model concerns, proposed and applied changes, and model failures. These records are local and ignored by Git.
+The runner scans every ten minutes and marks open positions every minute. Its log is `data/logs/runner.log`; the account and research record live in `data/book.sqlite`. Scans retain a source-code fingerprint, observation and evaluation times, the book before execution, settings, calibration, counts, refusals, equity, and favorite quotes. Trade records contain fills, fees, exits, and settlements. Retrospectives retain model concerns, proposed and applied changes, and model failures. These records are local and ignored by Git.
 
 Run `.venv/bin/python tools/paper_report.py` for a read-only JSON retrospective with recent scans, reviews, trades, changes, and cash/fee/P&L reconciliation. Fills and settlements update the account in one database transaction; an interrupted write rolls back the whole operation.
 
@@ -66,7 +66,7 @@ The table at the bottom is a model with a known true chance. It is not the live 
 
 ## Fees
 
-Kalshi's standard taker fee is `0.07 × contracts × price × (1 − price)`, rounded up to the next cent so the paper fill does not understate the cut. Some series use a different multiplier. That multiplier is not in the public market payload, so the standard schedule is the assumption until a later version reads it per series. A paper buy crosses the spread and pays that taker schedule.
+The scan reads each favorite's series fee multiplier and applies `0.07 × multiplier × contracts × price × (1 − price)`. Unknown fee schedules are skipped. Paper buys cross the spread; fills and exit marks round the fee up to the next cent as a conservative approximation. The recorded entry fee schedule is retained for exit marks. Kalshi's account-specific precision and per-order rounding rebates are not simulated. See the [series metadata](https://docs.kalshi.com/api-reference/market/get-series) and [fee-rounding rules](https://docs.kalshi.com/getting_started/fee_rounding).
 
 ## Keys, later
 

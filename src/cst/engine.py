@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import threading
 import time
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from cst.broker import PaperBroker
 from cst.config import Settings
@@ -74,6 +76,12 @@ def _shown_status(raw: str, paused: bool) -> str:
 class Engine:
     def __init__(self, settings: Settings, store: Store | None = None, fetcher=None, reviewer: Reviewer | None = None, depth=None, decider=None, history=None):
         self.settings = settings
+        source = Path(__file__).resolve().parent
+        digest = hashlib.sha256()
+        for path in sorted(source.rglob("*.py")):
+            digest.update(str(path.relative_to(source)).encode())
+            digest.update(path.read_bytes())
+        self.source_sha256 = digest.hexdigest()
         self.store = store or Store(settings.db_path, settings.seed_params(), float(settings.bankroll))
         self.broker = PaperBroker(self.store)
         self.fetcher = fetcher or default_fetch
@@ -187,13 +195,15 @@ class Engine:
         started = time.time()
         params = self.store.params()
         quotes, errors = self.fetcher(self.settings)
+        retrieved_at = datetime.now(timezone.utc)
         history_error = self._refresh_history()
         if history_error:
             errors.append(history_error)
         cycle = self.store.next_cycle()
         streaks = self.store.observe(cycle, [q.key for q in quotes if quote_in_band(q, params)])
         book = self.store.book(streaks)
-        result = evaluate(quotes, params, book)
+        evaluated_at = datetime.now(timezone.utc)
+        result = evaluate(quotes, params, book, now=evaluated_at)
         veto = self._veto(result.proposals)
         kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
         if isinstance(self.reviewer, Reviewer):
@@ -335,6 +345,13 @@ class Engine:
             observations.append(row)
         self.store.save_scan(cycle, {
             **info, "params": params.to_json(), "params_after": updated.to_json(),
+            "source_sha256": self.source_sha256,
+            "quotes_retrieved_at": retrieved_at.isoformat(), "evaluated_at": evaluated_at.isoformat(),
+            "book_before": {
+                "equity": book.equity, "cash": book.cash, "peak": book.peak, "deployed": book.deployed,
+                "positions": [asdict(item) for item in book.positions],
+                "streaks": book.streaks, "blocked": sorted(book.blocked), "operator_pause": book.operator_pause,
+            },
             "equity": round(equity, 4), "cash": self.store.cash(),
             "calibration": book.calibration,
             "refusals": refusal_counts(decisions),

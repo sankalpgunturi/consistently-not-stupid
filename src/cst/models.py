@@ -43,6 +43,7 @@ class Quote:
     bid_size: float = -1
     settled: bool = False
     winner: str | None = None
+    fee_verified: bool = True
 
     @property
     def key(self) -> str:

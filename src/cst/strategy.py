@@ -100,6 +100,8 @@ def _fee_ok(quote: Quote, params: StrategyParams) -> tuple[bool, float, float, s
 
 def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[str, str] | None:
     """Return a skip code, or None when the quote clears the structural gates."""
+    if not quote.fee_verified:
+        return "fee", "The series fee could not be verified. No paper fill was admitted."
     if quote.ask_size >= 0 and quote.ask_size + 1e-9 < quote.min_shares:
         return "book", "The size on the offer is smaller than the venue minimum."
     if quote.volume < 10 and quote.liquidity < 10:

@@ -1,9 +1,8 @@
 """Kalshi fee model.
 
 The standard taker fee is ``0.07 × C × P × (1 − P)``. Paper fills round
-that up to the next cent so the desk never understates the cut. Some series
-use a different multiplier; those are not in the public market payload, so
-the standard schedule is the assumption.
+that up to the next cent as a conservative approximation. Series metadata
+supplies the taker multiplier.
 """
 
 from __future__ import annotations
@@ -30,8 +29,8 @@ def kalshi_taker_fee(contracts: float | Decimal, price: float | Decimal, multipl
     return raw.quantize(CENT, rounding=ROUND_UP)
 
 
-def fee_for(model: str, shares: float, price: float, rate: float = 0, exponent: float = 1) -> Decimal:
-    del rate, exponent
+def fee_for(model: str, shares: float, price: float, rate: float = 0.07, exponent: float = 1) -> Decimal:
+    del exponent
     if model == "kalshi":
-        return kalshi_taker_fee(shares, price)
+        return kalshi_taker_fee(shares, price, D(rate) / D("0.07"))
     raise ValueError(f"unknown fee model {model}")

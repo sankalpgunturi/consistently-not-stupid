@@ -12,6 +12,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from cst.models import Quote
+from cst.fees import D
 from cst.strategy import price_bucket
 from cst.venues.http import MarketHttp
 
@@ -86,10 +87,17 @@ def _book_ok(bid: float, ask: float, keep_extremes: bool) -> bool:
     return bid > 0 and 0 < ask < 1
 
 
-def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extremes: bool = False) -> list[Quote]:
+def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extremes: bool = False, series: dict | None = None) -> list[Quote]:
     if market.get("mve_collection_ticker") or market.get("mve_selected_legs"):
         return []
     event = event or {}
+    fee_rate = 0.07
+    fee_verified = series is None  # Pure-parser fixtures retain the standard schedule.
+    if series is not None:
+        multiplier = _num(series.get("fee_multiplier"))
+        if series.get("fee_type") in {"quadratic", "quadratic_with_maker_fees"} and multiplier is not None and math.isfinite(multiplier) and multiplier >= 0:
+            fee_rate = float(D("0.07") * D(multiplier))
+            fee_verified = True
     status = str(market.get("status") or "").lower()
     result = str(market.get("result") or "").lower()
     winner = result if result in {"yes", "no"} else None
@@ -149,8 +157,9 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
             end_time=end,
             category=category,
             fee_model="kalshi",
-            fee_rate=0.07,
+            fee_rate=fee_rate,
             fee_exponent=1,
+            fee_verified=fee_verified,
             rules=rules,
             url=url,
             min_shares=1,
@@ -186,16 +195,39 @@ def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | N
             if not cursor or not batch:
                 break
         events = _event_titles(client, root, markets)
+        series, fee_errors = _series_fees(client, root, markets)
         for market in markets:
             event = events.get(str(market.get("event_ticker") or ""), {})
-            quotes.extend(quotes_from_kalshi_market(market, event))
-        return quotes, None
+            ticker = str(market.get("ticker") or "").split("-")[0]
+            quotes.extend(quotes_from_kalshi_market(market, event, series=series.get(ticker, {})))
+        error = f"Kalshi fee metadata unavailable for {fee_errors} series; affected candidates skipped." if fee_errors else None
+        return quotes, error
     except Exception as exc:
         log.warning("kalshi scan failed: %s", exc)
         return quotes, f"Kalshi: {exc}"
     finally:
         if own:
             client.close()
+
+
+def _series_fees(client: MarketHttp, root: str, markets: list[dict]) -> tuple[dict[str, dict], int]:
+    """One metadata read per series with a favorite; never guess an unknown fee."""
+    wanted = sorted({str(m.get("ticker") or "").split("-")[0] for m in markets
+                     if max(_num(m.get("yes_bid_dollars")) or 0, _num(m.get("no_bid_dollars")) or 0) >= 0.90})
+    found = {}
+    errors = 0
+    for ticker in wanted:
+        try:
+            payload = client.get_json(f"{root}/series/{ticker}")
+            row = payload.get("series") if isinstance(payload, dict) else None
+            mult = _num(row.get("fee_multiplier")) if isinstance(row, dict) else None
+            if not isinstance(row, dict) or row.get("fee_type") not in {"quadratic", "quadratic_with_maker_fees"} or mult is None or not math.isfinite(mult) or mult < 0:
+                errors += 1
+                continue
+            found[ticker] = row
+        except Exception:
+            errors += 1
+    return found, errors
 
 
 def _event_titles(client: MarketHttp, root: str, markets: list[dict]) -> dict[str, dict]:
