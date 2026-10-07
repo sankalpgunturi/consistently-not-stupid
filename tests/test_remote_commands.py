@@ -24,3 +24,12 @@ def test_remote_command_replay_cannot_repeat_mutation_even_after_reset(tmp_path)
         assert client.post('/api/pause', json={'paused': True}, headers=headers).status_code == 202
         assert not engine.store.operator_pause()
         assert client.post('/api/pause', json={'paused': True}, headers={'X-Command-Id': 'no-token'}).status_code == 403
+
+
+def test_public_snapshot_keeps_full_trade_history_but_not_research_archives():
+    history = [{'id': str(i), 'action': 'buy'} for i in range(100)]
+    result = public_snapshot({'trades': history, 'research': {'large_archive': 'x' * 100000},
+                              'tape': ['internal decisions'], 'latest_model_review': {'summary': 'Reviewed'}})
+    assert result['trades'] == history
+    assert result['latest_model_review']['summary'] == 'Reviewed'
+    assert 'research' not in result and 'tape' not in result
