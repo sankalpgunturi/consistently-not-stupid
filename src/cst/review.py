@@ -235,7 +235,7 @@ class Reviewer:
                 "inactive_legacy_knobs": ["min_hours_to_expiry", "max_days_to_expiry"] if params.entry_window_minutes > 0 else [],
             },
             "knobs": {key: {"value": getattr(params, key), "rail": RAILS[key]} for key in RAILS
-                      if not (params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge"})},
+                      if not (params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge", "stop_gap"})},
             "counts": counts,
             "proposals": [
                 {

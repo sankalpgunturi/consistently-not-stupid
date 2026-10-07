@@ -8,3 +8,5 @@ The scan in `engine.py` reads quotes, calls `strategy.evaluate`, optionally drop
 - `store.py` owns the sqlite book, the CSRF token, and the append-only audit.
 
 Do not add a route or a client method that posts an order.
+
+- The ten-minute paper strategy holds to the official outcome. No automatic price-drop stop-loss exits. Manual close remains available; legacy replay retains its stop rule.

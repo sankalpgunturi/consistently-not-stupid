@@ -28,7 +28,7 @@
     </div>
 
     <section class="card balance-chart">
-      <div class="card-head"><h2>Balance</h2></div>
+      <div class="card-head"><h2>Account value over time</h2></div>
       <p class="muted" id="benchmark" aria-live="polite">S&amp;P 500 —</p>
       <canvas id="equity" width="1100" height="190" aria-label="Paper account balance over time"></canvas>
     </section>
@@ -43,11 +43,8 @@
         <p class="empty" id="positions-empty">None</p>
       </article>
       <article class="card">
-        <div class="card-head"><h2>Recent trades</h2></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Trade</th><th>Price</th><th>Fee</th><th>P&amp;L</th></tr></thead>
-          <tbody id="trades"></tbody>
-        </table></div>
+        <div class="card-head"><h2>Trade history</h2></div>
+        <div id="trades" class="trade-stories"></div>
         <p class="empty" id="trades-empty">None</p>
       </article>
     </section>

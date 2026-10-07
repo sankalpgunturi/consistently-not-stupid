@@ -165,3 +165,23 @@ def test_paper_entries_and_fill_recheck_do_not_require_history(record):
     assert tightened_out(q, p, b, now=NOW) is None
     b.operator_pause = True
     assert tightened_out(q, p, b, now=NOW) is not None
+
+
+@pytest.mark.parametrize("winner", ["yes", "no"])
+def test_paper_holds_through_price_drop_then_settles(tmp_path, winner):
+    from cst.engine import Engine
+    from cst.broker import PaperBroker
+    engine = Engine(Settings(data_dir=str(tmp_path), entry_window_minutes=10), fetcher=lambda _: ([], []))
+    q = make_quote()
+    PaperBroker(engine.store).buy(q, 1, "paper_favorite", "test", 0)
+    cash = engine.store.cash()
+    engine.refresher = lambda *_: make_quote(bid=0.01, ask=0.02)
+    engine.mark_open()
+    assert len(engine.store.positions()) == 1
+    assert engine.store.cash() == cash
+    assert [t.action for t in engine.store.trades()] == ["buy"]
+    engine.refresher = lambda *_: make_quote(settled=True, winner=winner)
+    engine.mark_open()
+    assert not engine.store.positions()
+    assert engine.store.trades()[0].action == "settle"
+    assert bool(engine.store.trades()[0].won) == (q.side == winner)

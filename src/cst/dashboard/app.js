@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 const money = (value, digits = 2) => {
   const n = Number(value || 0);
   const sign = n < 0 ? "−" : "";
-  return sign + "$" + Math.abs(n).toLocaleString("en-US", {
+  return sign + "$" + (Math.round(Math.abs(n) * 10 ** digits + 1e-8) / 10 ** digits).toLocaleString("en-US", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -62,10 +62,10 @@ function render(next) {
   const multiple = (value) => value == null ? "—" : `${value.toFixed(3)}×`;
   const tone = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
   const cards = [
-    ["Account value", money(book.equity), "", multiple(book.start ? book.equity / book.start : null)],
+    ["Account value", money(book.equity), "", ""],
     ["Total profit", money(totalGain), tone(totalGain), ""],
     ["Last 24 hours", money(recent.net_pnl || 0), tone(recent.net_pnl || 0),
-      multiple(recent.multiple)],
+      ""],
   ];
   $("stats").innerHTML = cards.map(([label, value, color, detail]) =>
     `<div class="stat ${color}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`
@@ -73,7 +73,7 @@ function render(next) {
 
   const benchmark = next.benchmark || {};
   $("benchmark").textContent = benchmark.value == null ? "S&P 500 —" :
-    `S&P 500 ${money(benchmark.value)} · ${multiple(benchmark.multiple)} · ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Stale" : ""}`;
+    `$1,000 in S&P 500 → ${money(benchmark.value)} · Close ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Stale" : ""}`;
   $("benchmark").title = benchmark.basis || "Adjusted daily close";
   renderEvidence(next);
   renderResearch(next.research || {});
@@ -261,20 +261,39 @@ function renderAudit(rows) {
 }
 
 function renderTrades(rows) {
-  $("trades-empty").classList.toggle("hidden", rows.length > 0);
-  $("trades").closest(".table-wrap").classList.toggle("hidden", rows.length === 0);
-  $("trades").innerHTML = rows.slice(0, 8).map((row) => `
-    <tr>
-      <td class="num" title="${esc(new Date(row.ts).toLocaleString())}">${esc(new Date(row.ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}))}</td>
-      <td>
-        <span class="venue">${esc(row.action === "settle" ? (row.won ? "Won" : "Lost") : row.action === "buy" ? "Opened" : row.action === "sell" ? "Closed" : row.action)}</span>
-        <span class="title">${esc(row.title)}</span>
-      </td>
-      <td class="num">${esc(money(row.price))}</td>
-      <td class="num">${esc(money(row.fee))}</td>
-      <td class="num ${row.pnl < 0 ? "bad" : row.pnl > 0 ? "good" : ""}">${row.action === "buy" ? "—" : esc(money(row.pnl))}</td>
-    </tr>
-  `).join("");
+  const stories = [];
+  const pending = new Map();
+  for (const row of [...rows].reverse()) {
+    const key = `${row.venue}:${row.market_id}`;
+    if (row.action === "buy") {
+      const story = {entry: row, exit: null};
+      stories.push(story);
+      pending.set(key, story);
+    } else {
+      const story = pending.get(key);
+      if (story) { story.exit = row; pending.delete(key); }
+      else stories.push({entry: null, exit: row});
+    }
+  }
+  const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
+  $("trades-empty").classList.toggle("hidden", stories.length > 0);
+  $("trades").innerHTML = stories.reverse().slice(0, 8).map(({entry, exit}) => {
+    const row = entry || exit;
+    const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
+    const result = !exit ? "Open" : exit.pnl < 0 ? `Lost ${cents(-exit.pnl)}` : `Made ${cents(exit.pnl)}`;
+    const entryLine = entry ? `${time(entry.ts)} · Bought ${entry.shares} at ${cents(entry.price)} + ${cents(entry.fee)} fee` : "Entry outside recent history";
+    const exitLine = !exit ? "Awaiting exit or settlement" : exit.action === "settle"
+      ? `${time(exit.ts)} · Settled ${exit.won ? "win" : "loss"}`
+      : `${time(exit.ts)} · ${stopped ? "Stop-loss" : "Sold"} at ${cents(exit.price)} − ${cents(exit.fee)} fee`;
+    const cashLine = entry && exit ? `${cents(entry.shares * entry.price + entry.fee)} paid → ${cents(exit.shares * exit.price - exit.fee)} returned` : "";
+    return `<article class="trade-story">
+      <div class="trade-story-head"><strong>${esc(row.title)}</strong><strong class="${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${esc(result)}</strong></div>
+      <p>${esc(entryLine)}</p><p>${esc(exitLine)}</p>
+      ${cashLine ? `<p class="trade-cash">${esc(cashLine)}</p>` : ""}
+      ${stopped ? `<details><summary>Why we exited</summary><p>${esc(exit.reason)}</p></details>` : ""}
+    </article>`;
+  }).join("");
 }
 
 function drawEquity(points, start) {

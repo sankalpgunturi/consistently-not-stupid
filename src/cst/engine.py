@@ -247,6 +247,7 @@ class Engine:
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
+                "exit_policy": "Hold paper positions until an official result, unless the operator closes them. Price drops do not trigger automatic sales." if params.entry_window_minutes > 0 else "Legacy stop-loss applies.",
                 "admission_policy": "For the ten-minute paper experiment, historical sample size, win rate and confidence bounds are research only, never an entry requirement. Do not reinstate this gate through vetoes or parameter changes." if params.entry_window_minutes > 0 else "Legacy evidence gate applies.",
                 "calibration_source": "Prospective first eligible quote per event in the entry window; independent from old two-hour history. Different events may still correlate." if params.entry_window_minutes > 0 else "Legacy pre-close trade history",
                 "venue_errors": errors,
@@ -458,7 +459,7 @@ class Engine:
                             self._record_settlement(position, won, trade.pnl)
                     continue
                 self.broker.mark(position, quote.bid)
-                if 0 <= quote.bid <= position.entry_price - params.stop_gap:
+                if params.entry_window_minutes == 0 and 0 <= quote.bid <= position.entry_price - params.stop_gap:
                     depth = self.check_depth(quote, position.shares, "sell")
                     if not depth.ok:
                         continue
@@ -655,7 +656,7 @@ class Engine:
         unrealized = sum(item.mark_value - item.cost_basis for item in positions)
         param_rows = []
         for key, (label, help_text) in PARAM_COPY.items():
-            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge"}:
+            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge", "stop_gap"}:
                 continue
             lo, hi = RAILS[key]
             param_rows.append({

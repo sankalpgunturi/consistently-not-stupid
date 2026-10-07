@@ -25,3 +25,5 @@ Paper desk for high-probability Kalshi contracts. The aim is to be consistently 
 - The ten-minute paper experiment admits quoted favorites without a historical-evidence gate, as explicitly requested by the user. Retain prospective observations for analysis, not admission. Legacy replay keeps its historical rule. Preserve probability, timing, fee, liquidity, stability, exposure and execution checks.
 - Treat a similar title as a reason to buy. Twins inside Kalshi are skipped by the correlation check.
 - Add a mutating `/api/*` route that skips `X-CSRF-Token`. Reject a foreign `Origin` on those routes and on `/ws` before the socket is accepted.
+
+- The ten-minute paper strategy holds to the official outcome. No automatic price-drop stop-loss exits. Manual close remains available; legacy replay retains its stop rule.

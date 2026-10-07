@@ -11,7 +11,7 @@ After each `scan_interval_seconds` delay (default 60 seconds), `Engine.run_cycle
 3. Record eligible research observations and resolve pending outcomes. `strategy.evaluate` proposes stable quoted favorites that pass probability, fee, expected-outcome timing, size and correlation checks. The ten-minute paper experiment does not require historical evidence or a confidence bound. Research outcomes remain available for daily review. Legacy replay retains its evidence gate. Before each fill, re-read the knobs and book and run admission again.
 4. If `CST_OPENAI_API_KEY` is set, one `POST /v1/decisions` call (`gpt-6-luna`) may drop a proposed clip. The chat note may also name drops. Unknown ids are ignored.
 5. Before a paper buy, `depth.py` reads the Kalshi orderbook. The other side's bids are the ask. Short size, a moved touch, or a failed read skips the fill.
-6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. The mark loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and stops a clip whose bid fell `stop_gap` under the entry, if that bid has size.
+6. `broker.py` debits cash, stores the position, and appends a trade. Marks use the bid minus the exit fee. The mark loop (`mark_interval_seconds`, default 60s) refreshes open positions, settles authoritative results, and holds paper positions until an official result. Price-drop stops apply only in legacy replay; manual close remains available.
 7. The governor may tighten one knob. It writes an audit row.
 
 `cst simulate` is a separate model with a known true chance. It does not touch the book. `cst bench` times step 3, and step 4 when a key is set, and also does not touch the book.
