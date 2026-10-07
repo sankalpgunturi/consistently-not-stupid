@@ -53,7 +53,6 @@ function render(next) {
     trades: next.trades,
     focus: next.focus,
     retro: next.retrospective,
-    sim: Boolean(next.simulation && next.simulation.books),
     cycle: next.cycle,
     params: next.params,
     audit: next.audit,
@@ -122,7 +121,6 @@ function render(next) {
   renderPositions(next.positions || []);
   renderTape(next.tape || [], next.cycle || {});
   renderRetro(next.retrospective, next.llm || {});
-  renderModel(next.simulation);
   renderKnobs(next.params || []);
   renderTrades(next.trades || []);
   renderAudit(next.audit || []);
@@ -229,25 +227,6 @@ function renderResearch(research) {
   $("research-note").textContent = rows.length ? "A bucket needs at least 30 samples, and its cautious win rate must exceed the ask, fee, and required edge. Passing the sample minimum alone does not admit a trade." : "Historical samples are still being collected. The account stays in cash until the entry rule passes.";
 }
 
-function renderModel(sim) {
-  if (!sim || !sim.books) {
-    $("model-note").textContent = "The model is running.";
-    return;
-  }
-  $("model-body").innerHTML = sim.books.map((book) => `
-    <tr>
-      <td>${esc(book.name)}</td>
-      <td>${esc(book.world)}</td>
-      <td class="num">${esc(book.mean_trades)}</td>
-      <td class="num ${book.mean_pnl < 0 ? "bad" : book.mean_pnl > 0 ? "good" : ""}">${esc(money(book.mean_pnl))}</td>
-      <td class="num">${esc(money(book.mean_fees))}</td>
-      <td class="num">${esc(Math.round(book.paths_under_start * 100))}%</td>
-    </tr>
-  `).join("");
-  $("model-note").textContent = `${sim.note || ""} On the chart, red buys every favorite, cream is this desk when the quote is right, and green is this desk when the settled record sits above the ask.`;
-  drawModel(sim);
-}
-
 function renderKnobs(rows) {
   $("knobs").innerHTML = rows.map((row) => `
     <div class="knob">
@@ -321,35 +300,6 @@ function drawEquity(points, start) {
   ctx.beginPath();
   series.forEach((value, i) => (i ? ctx.lineTo(x(i), y(value)) : ctx.moveTo(x(i), y(value))));
   ctx.stroke();
-}
-
-function drawModel(sim) {
-  const canvas = $("model-chart");
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const lines = [
-    [sim.curves.naive_fair, "#e58972"],
-    [sim.curves.common_fair, "#f4ecdf"],
-    [sim.curves.common_dislocated, "#9dcc86"],
-  ];
-  const all = lines.flatMap(([series]) => series || []);
-  if (!all.length) return;
-  const min = Math.min(...all) - 1;
-  const max = Math.max(...all) + 1;
-  const y = (v) => 16 + (1 - (v - min) / (max - min)) * (h - 32);
-  lines.forEach(([series, color]) => {
-    if (!series) return;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    series.forEach((value, i) => {
-      const px = 16 + (i * (w - 32)) / Math.max(1, series.length - 1);
-      i ? ctx.lineTo(px, y(value)) : ctx.moveTo(px, y(value));
-    });
-    ctx.stroke();
-  });
 }
 
 async function pull() {
