@@ -148,13 +148,13 @@ function renderKnobs(rows) {
     let draft = knobDrafts.get(row.key);
     if (draft && draft.current !== row.value) { knobDrafts.delete(row.key); draft = null; }
     const value = draft?.value ?? row.value;
-    const adjustable = row.adjustable !== false && Number.isFinite(row.next_value) && row.next_value !== row.value;
+    const adjustable = row.adjustable !== false && Number.isFinite(row.step);
     const changed = value !== row.value;
     return `<div class="knob">
       <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.key === 'min_probability' ? 'Entry probability' : row.label)}</label>
       <output aria-live="polite" id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
-      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="1" step="1" value="${value === Math.min(row.value, row.next_value) ? 0 : 1}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>
-      <div class="slider-bounds" aria-hidden="true"><span>${esc(formatKnob({...row,value:Math.min(row.value,row.next_value)}))}</span><span>${esc(formatKnob({...row,value:Math.max(row.value,row.next_value)}))}</span></div>` : ''}</div>
+      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="${Math.round((row.max-row.min)/row.step)}" step="1" value="${Math.round((value-row.min)/row.step)}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Choose a value, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>
+      <div class="slider-bounds" aria-hidden="true"><span>${esc(formatKnob({...row,value:row.min}))}</span><span>${esc(formatKnob({...row,value:row.max}))}</span></div>` : ''}</div>
       ${adjustable ? `<button class="mini" data-tighten="${esc(row.key)}" ${!changed || knobBusy || pendingCommand ? 'disabled' : ''}>Apply</button>` : ''}
     </div>`;
   }).join("");
@@ -164,7 +164,7 @@ $("knobs").addEventListener("input", event => {
   const input = event.target;
   const row = state?.params?.find(row => row.key === input.dataset.knob);
   if (!row) return;
-  const value = Number(input.value) === 0 ? Math.min(row.value, row.next_value) : Math.max(row.value, row.next_value);
+  const value = Number((row.min + Number(input.value) * row.step).toFixed(8));
   knobDrafts.set(row.key, {current: row.value, value});
   const label = formatKnob({...row, value});
   $("value-" + row.key).textContent = label;
@@ -179,10 +179,12 @@ function formatKnob(row) {
     "min_probability", "max_position_fraction", "max_deployed_fraction",
     "max_category_fraction", "max_drawdown", "correlation_threshold",
   ]);
+  if (row.key === "stop_loss_cents") return value === 0 ? "Off" : `${value}¢ below entry`;
+  if (row.key === "amount_per_bet") return `$${value.toFixed(2)}`;
   if (cents.has(row.key)) return `${(value * 100).toFixed(1)}¢`;
   if (percent.has(row.key)) return `${(value * 100).toFixed(1)}%`;
   if (row.key === "entry_window_minutes") return `${value} min`;
-  if (row.key === "scan_interval_seconds") return value < 60 ? `${value} sec` : `${Math.round(value / 60)} min`;
+  if (row.key === "scan_interval_seconds") return value < 60 ? `${value} sec` : `${Math.floor(value / 60)} min${value % 60 ? ` ${value % 60} sec` : ""}`;
   if (row.key === "min_hours_to_expiry") return `${value} hours`;
   if (row.key === "max_days_to_expiry") return `${value} days`;
   return String(row.value);
@@ -447,7 +449,7 @@ document.body.addEventListener("click", async (event) => {
     if (knobBusy || pendingCommand || !draft || draft.value === draft.current) return;
     knobBusy = true;
     renderKnobs(state?.params || []);
-    try { await post("/api/knob", { key }); }
+    try { await post("/api/knob", { key, value: draft.value }); }
     finally { knobBusy = false; knobDrafts.delete(key); renderKnobs(state?.params || []); }
   }
 });

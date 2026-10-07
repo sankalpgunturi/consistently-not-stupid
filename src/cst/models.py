@@ -65,6 +65,8 @@ class StrategyParams:
     # Zero preserves replay compatibility with the former long-horizon strategy.
     entry_window_minutes: float = 0
     min_probability: float = 0.90
+    amount_per_bet: float = 1.0
+    stop_loss_cents: int = 0
     min_win_profit: float = 0.01
     min_edge: float = 0.01
     max_spread: float = 0.03
@@ -93,8 +95,8 @@ class StrategyParams:
 
 # Rails the retrospective is allowed to move, and the largest step per scan.
 RAILS: dict[str, tuple[float, float]] = {
-    "entry_window_minutes": (1, 10),
-    "min_probability": (0.90, 0.97),
+    "entry_window_minutes": (1, 60),
+    "min_probability": (0.80, 0.99),
     "min_win_profit": (0.005, 0.03),
     "min_edge": (0.005, 0.04),
     "max_spread": (0.01, 0.05),
@@ -318,3 +320,13 @@ class BookView:
     settlements: list[Settlement] = field(default_factory=list)
     blocked: set[str] = field(default_factory=set)
     operator_pause: bool = False
+
+
+# Explicit operator controls; automatic reviews retain their tightening rails.
+OPERATOR_CONTROLS = {
+    "entry_window_minutes": ("Outcome within", 1, 60, 1),
+    "min_probability": ("Entry probability", 0.80, 0.99, 0.01),
+    "scan_interval_seconds": ("Scan every", 1, 60, 1),
+    "amount_per_bet": ("Amount per bet", 1, 100, 1),
+    "stop_loss_cents": ("Stop loss", 0, 50, 1),
+}

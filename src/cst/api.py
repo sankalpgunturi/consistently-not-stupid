@@ -42,6 +42,7 @@ class CloseIn(BaseModel):
 
 class KnobIn(BaseModel):
     key: str
+    value: float | None = None
 
 
 class LiveIn(BaseModel):
@@ -216,7 +217,7 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
 
     @app.post("/api/knob")
     def knob(body: KnobIn):
-        state, error = engine.tighten(body.key)
+        state, error = engine.set_control(body.key, body.value) if body.value is not None else engine.tighten(body.key)
         if error:
             return JSONResponse({"error": error, "state": state}, status_code=400)
         return state

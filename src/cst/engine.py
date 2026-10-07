@@ -18,11 +18,11 @@ from cst.config import Settings
 from cst.decisions import veto_proposals
 from cst.depth import DepthResult, live_depth
 from cst.daily import current_day, evaluate_days, save_reviews, rolling_day
-from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
+from cst.models import OPERATOR_CONTROLS, PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
+from cst.strategy import shares_for_budget, _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
 from cst.fees import fee_for
 from cst.live import KalshiTrader, LiveTradingError, parse_live_amount
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
@@ -258,11 +258,11 @@ class Engine:
                 "positions": [item.to_json() for item in book.positions],
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
-                "strategy_thesis": "90%+ favorites, outcome expected within ten minutes, small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
+                "strategy_thesis": f"{params.min_probability:.0%}+ favorites, outcome expected within {params.entry_window_minutes:g} minutes, small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
-                "exit_policy": "Hold paper positions until an official result, unless the operator closes them. Price drops do not trigger automatic sales." if params.entry_window_minutes > 0 else "Legacy stop-loss applies.",
+                "exit_policy": (f"Operator stop-loss: exit at a sell bid {params.stop_loss_cents:g} cents below entry, subject to depth and execution." if params.stop_loss_cents else "Hold until the official result unless manually closed; stop-loss is off.") if params.entry_window_minutes > 0 else "Legacy stop-loss applies.",
                 "admission_policy": "For the ten-minute paper experiment, historical sample size, win rate and confidence bounds are research only, never an entry requirement. Do not reinstate this gate through vetoes or parameter changes." if params.entry_window_minutes > 0 else "Legacy evidence gate applies.",
                 "calibration_source": "Prospective first eligible quote per event in the entry window; independent from old two-hour history. Different events may still correlate." if params.entry_window_minutes > 0 else "Legacy pre-close trade history",
                 "venue_errors": errors,
@@ -317,6 +317,9 @@ class Engine:
                 refreshed.category = proposal.quote.category
                 refreshed.event_title = proposal.quote.event_title
                 proposal.quote = refreshed
+            proposal.shares = min(proposal.shares, shares_for_budget(proposal.quote, self.store.params()))
+            if proposal.shares < proposal.quote.min_shares:
+                continue
             depth = self.check_depth(proposal.quote, proposal.shares, "buy")
             if not depth.ok:
                 decisions.append(Decision(
@@ -338,7 +341,7 @@ class Engine:
                 continue
             fresh = self.store.params()
             live = self.store.book(streaks)
-            why = tightened_out(proposal.quote, fresh, live, already_bought=bought)
+            why = tightened_out(proposal.quote, fresh, live, already_bought=bought, shares=proposal.shares)
             if why:
                 decisions.append(Decision(
                     action="skipped",
@@ -505,14 +508,15 @@ class Engine:
                             self._record_settlement(position, won, trade.pnl)
                     continue
                 self.broker.mark(position, quote.bid)
-                if params.entry_window_minutes == 0 and 0 <= quote.bid <= position.entry_price - params.stop_gap:
+                stop_gap = params.stop_gap if params.entry_window_minutes == 0 else params.stop_loss_cents / 100
+                if stop_gap > 0 and 0 <= quote.bid <= position.entry_price - stop_gap + 1e-12:
                     depth = self.check_depth(quote, position.shares, "sell")
                     if not depth.ok:
                         continue
                     self._execute_sell(
                         position,
                         quote.bid,
-                        f"The bid fell to {quote.bid:.2f}, {params.stop_gap * 100:.0f}¢ under the price we paid. The reason for the trade is gone.",
+                        f"Stop-loss: sell bid {quote.bid:.2f} reached the {stop_gap * 100:g}¢ drop from entry {position.entry_price:.2f}.",
                     )
             equity = self.store.mark_equity()
             self.store.note_peak(equity)
@@ -627,6 +631,26 @@ class Engine:
     def block_market(self, key: str) -> dict:
         self.store.block(key, "The operator blocked this contract.")
         return self.snapshot()
+
+    def set_control(self, key: str, value: float) -> tuple[dict, str | None]:
+        import math
+        spec = OPERATOR_CONTROLS.get(key)
+        if spec is None:
+            return self.snapshot(), "Unknown setting."
+        _label, lo, hi, step = spec
+        if not math.isfinite(value) or not lo <= value <= hi or abs((value-lo)/step - round((value-lo)/step)) > 1e-7:
+            return self.snapshot(), "Value is outside the allowed range or step."
+        value = round(value, 8)
+        before = {}
+        def revise(current):
+            data = current.to_json()
+            before[key] = data[key]
+            data[key] = value
+            return StrategyParams.from_json(data), [], {key: value}
+        self.store.revise_params(revise)
+        self.store.append_audit("operator", "setting", before, {key: value}, "Operator selected a strategy setting.")
+        self._wake.set()
+        return self.snapshot(), None
 
     def tighten(self, key: str) -> tuple[dict, str | None]:
         change: dict[str, float] = {}
@@ -756,27 +780,9 @@ class Engine:
         resolved = len(settlements)
         hits = sum(1 for row in settlements if row.won)
         unrealized = sum(item.mark_value - item.cost_basis for item in positions)
-        param_rows = []
-        for key, (label, help_text) in PARAM_COPY.items():
-            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry", "min_sample", "min_edge", "stop_gap"}:
-                continue
-            lo, hi = RAILS[key]
-            param_rows.append({
-                "key": key,
-                "label": label,
-                "help": help_text,
-                "value": getattr(params, key),
-                "min": lo,
-                "max": hi,
-                "adjustable": key != "scan_interval_seconds",
-                "next_value": tighten_value(params, key) if key != "scan_interval_seconds" else None,
-            })
-        if params.entry_window_minutes > 0:
-            param_rows.insert(0, {"key": "entry_window_minutes", "label": "Outcome within",
-                "help": "Minutes until the venue expects the outcome; payout may come later.",
-                "value": params.entry_window_minutes, "min": 1,
-                "max": 10, "adjustable": True,
-                "next_value": tighten_value(params, "entry_window_minutes")})
+        param_rows = [{"key": key, "label": label, "value": getattr(params, key),
+                       "min": lo, "max": hi, "step": step, "adjustable": True}
+                      for key, (label, lo, hi, step) in OPERATOR_CONTROLS.items()]
         retros = self.store.retros(6)
         research = self.store.research_summary()
         research["calibration"] = [

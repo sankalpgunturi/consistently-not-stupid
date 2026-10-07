@@ -56,7 +56,7 @@ def test_scan_evidence_survives_restart_and_model_concerns_are_kept(tmp_path, mo
     assert state["research"]["observations"] == 1
     assert state["research"]["distinct_contract_sides"] == 1
     scan = state["research"]["recent_scans"][0]
-    assert scan["params"]["min_probability"] == 0.90
+    assert scan["params"]["min_probability"] == settings.min_probability
     assert len(scan["source_sha256"]) == 64
     assert scan["book_before"]["cash"] == 1000
     assert scan["book_before"]["streaks"][quote.key] == 1

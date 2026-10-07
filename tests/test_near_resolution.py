@@ -10,9 +10,10 @@ from cst.strategy import evaluate, tightened_out
 from tests.conftest import NOW, make_quote, make_book, make_params
 
 
-def test_new_books_target_ten_minutes():
+def test_new_books_target_five_minutes():
     params = Settings().seed_params()
-    assert params.entry_window_minutes == 10
+    assert params.entry_window_minutes == 5
+    assert params.min_probability == .8
     assert params.scan_interval_seconds == 1
 
 

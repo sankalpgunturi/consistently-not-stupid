@@ -12,26 +12,25 @@ from tests.conftest import NOW, make_book, make_params, make_quote
 from datetime import timedelta
 
 
-def test_visible_settings_tighten_through_api_and_persist(tmp_path):
-    engine = Engine(Settings(data_dir=str(tmp_path), entry_window_minutes=10), fetcher=lambda _: ([], []))
+def test_visible_settings_are_editable_both_directions_and_persist(tmp_path):
+    engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _: ([], []))
     with TestClient(create_app(engine, start_loop=False), base_url='http://127.0.0.1') as client:
         state = client.get('/api/state').json()
         headers = {'X-CSRF-Token': state['csrf']}
+        assert [r['key'] for r in state['params']] == ['entry_window_minutes', 'min_probability', 'scan_interval_seconds', 'amount_per_bet', 'stop_loss_cents']
         for row in state['params']:
-            if not row.get('adjustable', True):
-                continue
             key = row['key']
-            expected = tighten_value(engine.store.params(), key)
-            assert row['next_value'] == pytest.approx(expected) if expected is not None else row['next_value'] is None
-            before = getattr(engine.store.params(), key)
-            assert client.post('/api/knob', json={'key': key}).status_code == 403
-            response = client.post('/api/knob', headers=headers, json={'key': key})
-            assert response.status_code == 200
-            actual = getattr(engine.store.params(), key)
-            assert actual == pytest.approx(expected if expected is not None else before)
-            reopened = Store(tmp_path/'book.sqlite', StrategyParams(), 1000)
-            assert getattr(reopened.params(), key) == pytest.approx(actual)
-            reopened.conn.close()
+            for value in (row['max'], row['min']):
+                body = {'key': key, 'value': value}
+                assert client.post('/api/knob', json=body).status_code == 403
+                assert client.post('/api/knob', headers={**headers, 'Origin': 'https://foreign.test'}, json=body).status_code == 403
+                assert client.post('/api/knob', headers=headers, json=body).status_code == 200
+                assert getattr(engine.store.params(), key) == pytest.approx(value)
+                reopened = Store(tmp_path/'book.sqlite', StrategyParams(), 1000)
+                assert getattr(reopened.params(), key) == pytest.approx(value)
+                reopened.conn.close()
+            assert client.post('/api/knob', headers=headers, json={'key': key, 'value': row['max']+row['step']}).status_code == 400
+        assert client.post('/api/knob', headers=headers, json={'key': 'max_spread', 'value': .05}).status_code == 400
 
 
 def test_spread_and_deployed_cap_block_entries_after_tightening():
@@ -90,3 +89,37 @@ def test_outcome_window_tightens_without_enabling_legacy_mode():
     assert tighten_value(p,'entry_window_minutes') is None
     p.entry_window_minutes = 0
     assert tighten_value(p,'entry_window_minutes') is None
+
+
+def test_amount_sizes_whole_contracts_including_fees():
+    from cst.strategy import evaluate, shares_for_budget
+    from cst.fees import fee_for
+    q = make_quote(bid=.80, ask=.82, end_time=NOW+timedelta(minutes=4), expected_resolution_time=NOW+timedelta(minutes=4))
+    p = make_params(entry_window_minutes=5, min_probability=.80, amount_per_bet=20)
+    b = make_book(streaks={q.key: 2})
+    proposal = evaluate([q], p, b, now=NOW).proposals[0]
+    n = proposal.shares
+    cost = lambda size: size*q.ask+float(fee_for(q.fee_model,size,q.ask,q.fee_rate,q.fee_exponent))
+    assert n > 1 and n == int(n)
+    assert cost(n) <= 20 < cost(n+1)
+    assert tightened_out(q,p,b,now=NOW,shares=n) is None
+    p.amount_per_bet = 1
+    assert shares_for_budget(q,p) == 1
+    assert 'cap' in tightened_out(q,p,b,now=NOW,shares=n)
+    p.min_probability = .90
+    assert not evaluate([q],p,b,now=NOW).proposals
+    p.min_probability = .80
+    p.entry_window_minutes = 3
+    assert not evaluate([q],p,b,now=NOW).proposals
+
+
+@pytest.mark.parametrize('stop,bid,depth_ok,closed', [(0,.20,True,False),(10,.81,True,False),(10,.80,True,True),(10,.79,False,False)])
+def test_operator_stop_loss_respects_bid_threshold_and_depth(tmp_path,stop,bid,depth_ok,closed):
+    from cst.depth import DepthResult
+    engine = Engine(Settings(data_dir=str(tmp_path),stop_loss_cents=stop),fetcher=lambda _: ([],[]))
+    q = make_quote(bid=.89,ask=.90)
+    PaperBroker(engine.store).buy(q,1,'paper_favorite','test',0)
+    engine.refresher = lambda *_: make_quote(bid=bid,ask=bid+.01)
+    engine.depth = lambda *_: DepthResult(depth_ok, 'test', 'test')
+    engine.mark_open()
+    assert (not engine.store.positions()) is closed

@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     kalshi_pages: int = 8
     kalshi_page_size: int = 200
 
-    entry_window_minutes: float = 10
-    min_probability: float = 0.90
+    entry_window_minutes: float = 5
+    min_probability: float = 0.80
+    amount_per_bet: float = 1.0
+    stop_loss_cents: int = 0
     min_win_profit: float = 0.01
     min_edge: float = 0.01
     max_spread: float = 0.03
@@ -51,6 +53,8 @@ class Settings(BaseSettings):
         return StrategyParams(
             entry_window_minutes=self.entry_window_minutes,
             min_probability=self.min_probability,
+            amount_per_bet=self.amount_per_bet,
+            stop_loss_cents=self.stop_loss_cents,
             min_win_profit=self.min_win_profit,
             min_edge=self.min_edge,
             max_spread=self.max_spread,

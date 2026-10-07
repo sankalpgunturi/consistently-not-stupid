@@ -81,6 +81,23 @@ def _hours_left(quote: Quote, now: datetime) -> float | None:
     return (end - now).total_seconds() / 3600
 
 
+def shares_for_budget(quote: Quote, params: StrategyParams) -> float:
+    if params.entry_window_minutes == 0:
+        return quote.min_shares
+    # Whole contracts, including the venue's rounded fee, never exceed budget.
+    if quote.ask <= 0 or not math.isfinite(quote.ask):
+        return 0
+    lo, hi = 0, int(params.amount_per_bet / quote.ask)
+    while lo < hi:
+        middle = (lo + hi + 1) // 2
+        cost = middle * quote.ask + float(fee_for(quote.fee_model, middle, quote.ask, quote.fee_rate, quote.fee_exponent))
+        if cost <= params.amount_per_bet + 1e-9:
+            lo = middle
+        else:
+            hi = middle - 1
+    return lo if lo >= quote.min_shares else 0
+
+
 def _fee_ok(quote: Quote, params: StrategyParams) -> tuple[bool, float, float, str]:
     shares = quote.min_shares
     fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
@@ -136,7 +153,7 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     if params.entry_window_minutes > 0:
         _ok, _fee, _profit, detail = _fee_ok(quote, params)
         return Proposal(
-            quote=quote, shares=quote.min_shares, edge=0.0,
+            quote=quote, shares=shares_for_budget(quote, params), edge=0.0,
             signal="paper_favorite", detail=detail,
             confirm="Quoted favorite; historical evidence is not required",
         )
@@ -162,7 +179,7 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     )
 
 
-def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: datetime | None = None, already_bought: int = 0) -> str | None:
+def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: datetime | None = None, already_bought: int = 0, shares: float | None = None) -> str | None:
     """Explain a failed admission recheck using current quotes, rules and book."""
     now = now or datetime.now(timezone.utc)
     if not quote_in_band(quote, params):
@@ -185,7 +202,7 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
     held = {f"{item.venue}:{item.market_id}:{item.side}" for item in book.positions}
     if quote.key in held or _twin_of(quote, [], book, params):
         return "Final check: the book already holds this risk."
-    fits, cost, why = _clip_fits(quote, params, book.equity)
+    fits, cost, why = _clip_fits(quote, params, book.equity, shares)
     if not fits:
         return f"Final check: {why}"
     if cost > book.cash + 1e-9:
@@ -201,14 +218,18 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
     return None
 
 
-def _clip_fits(quote: Quote, params: StrategyParams, equity: float) -> tuple[bool, float, str]:
-    shares = quote.min_shares
+def _clip_fits(quote: Quote, params: StrategyParams, equity: float, shares: float | None = None) -> tuple[bool, float, str]:
+    shares = shares_for_budget(quote, params) if shares is None else shares
+    if shares < quote.min_shares:
+        return False, 0, "The amount per bet cannot cover one contract including fees."
+    if quote.ask_size >= 0 and shares > quote.ask_size:
+        return False, 0, "The order book cannot cover the selected amount."
     fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
     cost = shares * quote.ask + fee
-    cap = equity * params.max_position_fraction
+    cap = params.amount_per_bet if params.entry_window_minutes > 0 else equity * params.max_position_fraction
     if cost > cap + 1e-9:
         return False, cost, (
-            f"The venue minimum costs ${cost:.2f}, and the per-trade cap is ${cap:.2f}."
+            f"The selected contracts cost ${cost:.2f}, and the per-trade cap is ${cap:.2f}."
         )
     return True, cost, ""
 
