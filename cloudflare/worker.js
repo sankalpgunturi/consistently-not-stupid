@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 const headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'};
 const json = (body, status = 200) => Response.json(body, {status, headers});
-const actions = new Set(['pause', 'scan', 'reset', 'block', 'knob', 'close']);
+const actions = new Set(['pause', 'scan', 'reset', 'block', 'knob', 'close', 'live']);
 
 export class DeskSnapshot extends DurableObject {
   constructor(ctx, env) {

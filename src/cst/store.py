@@ -151,6 +151,14 @@ class Store:
             """
         )
         trade_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(trades)")}
+        if "ledger" not in trade_columns:
+            self.conn.execute("ALTER TABLE trades ADD COLUMN ledger TEXT NOT NULL DEFAULT 'paper'")
+        position_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(positions)")}
+        if "ledger" not in position_columns:
+            self.conn.execute("ALTER TABLE positions ADD COLUMN ledger TEXT NOT NULL DEFAULT 'paper'")
+        equity_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(equity)")}
+        if "ledger" not in equity_columns:
+            self.conn.execute("ALTER TABLE equity ADD COLUMN ledger TEXT NOT NULL DEFAULT 'paper'")
         if "side" not in trade_columns:
             self.conn.execute("ALTER TABLE trades ADD COLUMN side TEXT NOT NULL DEFAULT ''")
             # Recover old picks only from archived positions matching entry time.
@@ -267,7 +275,10 @@ class Store:
                 self._put("csrf", secrets.token_urlsafe(24))
                 self._put("blocked", [])
                 self._put("operator_pause", False)
-                self.conn.execute("INSERT INTO equity (ts, equity) VALUES (?, ?)", (_iso(), self.bankroll))
+                self.conn.execute(
+                    "INSERT INTO equity (ts, equity, ledger) VALUES (?, ?, 'paper')",
+                    (_iso(), self.bankroll),
+                )
                 self._commit()
 
     def _ensure_controls(self) -> None:
@@ -328,43 +339,93 @@ class Store:
             self._put("governor_seen", int(count))
             self._commit()
 
+    def trading_mode(self) -> str:
+        with self.lock:
+            return "live" if self._get("mode") == "live" else "paper"
+
+    def live_budget(self) -> float | None:
+        with self.lock:
+            amount = self._get("live_budget")
+        return float(amount) if amount is not None else None
+
+    def exchange_balance(self) -> float | None:
+        with self.lock:
+            amount = self._get("live_exchange_balance")
+        return float(amount) if amount is not None else None
+
+    def arm_live(self, dollars: int, exchange_balance: float | None) -> None:
+        """Switch the working book to the approved dollars. The paper ledger stays stored."""
+        with self.lock:
+            self._put("mode", "live")
+            self._put("live_budget", int(dollars))
+            self._put("live_cash", float(dollars))
+            self._put("live_peak", float(dollars))
+            self._put("live_realized", 0.0)
+            self._put("live_fees_paid", 0.0)
+            self._put("live_started_at", _iso())
+            if exchange_balance is not None:
+                self._put("live_exchange_balance", round(float(exchange_balance), 2))
+            self._audit(
+                "operator",
+                "live",
+                "paper",
+                {"amount": int(dollars)},
+                f"The operator approved live trading for ${int(dollars):,}.",
+            )
+            self._commit()
+
+    def _ledger(self) -> str:
+        return "live" if self._get("mode") == "live" else "paper"
+
+    def _account_key(self, name: str) -> str:
+        if self._get("mode") != "live":
+            return name
+        return {"cash": "live_cash", "peak": "live_peak", "realized": "live_realized", "fees_paid": "live_fees_paid"}[name]
+
     def cash(self) -> float:
         with self.lock:
+            if self._get("mode") == "live":
+                return float(self._get("live_cash", 0))
             return float(self._get("cash", self.bankroll))
 
     def set_cash(self, cash: float) -> None:
         with self.lock:
-            self._put("cash", round(float(cash), 6))
+            self._put(self._account_key("cash"), round(float(cash), 6))
             self._commit()
 
     def add_fee(self, fee: float) -> None:
         with self.lock:
-            self._put("fees_paid", round(float(self._get("fees_paid", 0)) + fee, 6))
+            key = self._account_key("fees_paid")
+            self._put(key, round(float(self._get(key, 0)) + fee, 6))
             self._commit()
 
     def fees_paid(self) -> float:
         with self.lock:
-            return float(self._get("fees_paid", 0))
+            return float(self._get(self._account_key("fees_paid"), 0))
 
     def realized(self) -> float:
         with self.lock:
-            return float(self._get("realized", 0))
+            return float(self._get(self._account_key("realized"), 0))
 
     def add_realized(self, pnl: float) -> None:
         with self.lock:
-            self._put("realized", round(float(self._get("realized", 0)) + pnl, 6))
+            key = self._account_key("realized")
+            self._put(key, round(float(self._get(key, 0)) + pnl, 6))
             self._commit()
 
     def peak(self) -> float:
         with self.lock:
-            return float(self._get("peak", self.bankroll))
+            default = self._get("live_budget", 0) if self._get("mode") == "live" else self.bankroll
+            return float(self._get(self._account_key("peak"), default))
 
     def note_peak(self, equity: float) -> float:
         with self.lock:
-            peak = float(self._get("peak", self.bankroll))
+            key = self._account_key("peak")
+            default = self._get("live_budget", 0) if self._get("mode") == "live" else self.bankroll
+            peak = float(self._get(key, default))
             if equity > peak:
                 peak = equity
-                self._put("peak", round(peak, 6))
+                self._put(key, round(peak, 6))
                 self._commit()
             return peak
 
@@ -421,7 +482,7 @@ class Store:
 
     def positions(self) -> list[Position]:
         with self.lock:
-            rows = self.conn.execute("SELECT * FROM positions").fetchall()
+            rows = self.conn.execute("SELECT * FROM positions WHERE ledger = ?", (self._ledger(),)).fetchall()
         return [_position(row) for row in rows]
 
     def save_position(self, position: Position) -> None:
@@ -431,8 +492,9 @@ class Store:
                 INSERT OR REPLACE INTO positions (
                     id, venue, market_id, event_id, event_title, title, outcome, side,
                     category, shares, entry_price, cost_basis, fees, signal, reason,
-                    opened_cycle, bid, end_time, fee_model, fee_rate, fee_exponent, url, opened_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    opened_cycle, bid, end_time, fee_model, fee_rate, fee_exponent, url, opened_at,
+                    ledger
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     position.id, position.venue, position.market_id, position.event_id,
@@ -440,7 +502,7 @@ class Store:
                     position.category, position.shares, position.entry_price, position.cost_basis,
                     position.fees, position.signal, position.reason, position.opened_cycle,
                     position.bid, position.end_time, position.fee_model, position.fee_rate,
-                    position.fee_exponent, position.url, position.opened_at,
+                    position.fee_exponent, position.url, position.opened_at, self._ledger(),
                 ),
             )
             self._commit()
@@ -456,13 +518,14 @@ class Store:
                 """
                 INSERT INTO trades (
                     id, ts, venue, market_id, title, outcome, action, shares, price,
-                    fee, pnl, cash_after, signal, reason, won, side
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    fee, pnl, cash_after, signal, reason, won, side, ledger
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     trade.id, trade.ts, trade.venue, trade.market_id, trade.title,
                     trade.outcome, trade.action, trade.shares, trade.price, trade.fee,
                     trade.pnl, trade.cash_after, trade.signal, trade.reason, trade.won, trade.side,
+                    self._ledger(),
                 ),
             )
             self._commit()
@@ -470,8 +533,8 @@ class Store:
     def trades(self, limit: int = 40) -> list[Trade]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT * FROM trades ORDER BY ts DESC, rowid DESC LIMIT ?",
-                (limit,),
+                "SELECT * FROM trades WHERE ledger = ? ORDER BY ts DESC, rowid DESC LIMIT ?",
+                (self._ledger(), limit),
             ).fetchall()
         return [_trade(row) for row in rows]
 
@@ -479,7 +542,8 @@ class Store:
         """Completed trades only; pnl already includes entry and exit fees."""
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, ts, title, side, pnl FROM trades WHERE action IN ('sell', 'settle') ORDER BY ts, rowid"
+                "SELECT id, ts, title, side, pnl FROM trades WHERE ledger = ? AND action IN ('sell', 'settle') ORDER BY ts, rowid",
+                (self._ledger(),),
             ).fetchall()
         total = 0.0
         points = []
@@ -491,16 +555,16 @@ class Store:
     def add_equity(self, equity: float, ts: datetime | None = None) -> None:
         with self.lock:
             self.conn.execute(
-                "INSERT INTO equity (ts, equity) VALUES (?, ?)",
-                (_iso(ts), round(float(equity), 6)),
+                "INSERT INTO equity (ts, equity, ledger) VALUES (?, ?, ?)",
+                (_iso(ts), round(float(equity), 6), self._ledger()),
             )
             self._commit()
 
     def equity_curve(self, limit: int = 400) -> list[dict]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT ts, equity FROM equity ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "SELECT ts, equity FROM equity WHERE ledger = ? ORDER BY id DESC LIMIT ?",
+                (self._ledger(), limit),
             ).fetchall()
         return [{"t": row["ts"], "equity": row["equity"]} for row in reversed(rows)]
 

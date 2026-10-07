@@ -30,17 +30,23 @@ def model_usage_totals(scans):
 
 def period_report(store, start, end, *, current_equity=None, include_evidence=True):
     with store.lock:
-        first = store.conn.execute('SELECT ts,equity FROM equity WHERE ts <= ? ORDER BY id DESC LIMIT 1', (_iso(start),)).fetchone()
-        last = store.conn.execute('SELECT ts,equity FROM equity WHERE ts <= ? ORDER BY id DESC LIMIT 1', (_iso(end),)).fetchone()
+        ledger = 'live' if store._get('mode') == 'live' else 'paper'
+        first = store.conn.execute('SELECT ts,equity FROM equity WHERE ledger = ? AND ts <= ? ORDER BY id DESC LIMIT 1', (ledger, _iso(start))).fetchone()
+        last = store.conn.execute('SELECT ts,equity FROM equity WHERE ledger = ? AND ts <= ? ORDER BY id DESC LIMIT 1', (ledger, _iso(end))).fetchone()
         scan_rows = store.conn.execute('SELECT payload FROM scans WHERE ts >= ? AND ts < ?', (_iso(start),_iso(end))).fetchall() if include_evidence else []
         changes = store.conn.execute('SELECT actor,action,reason FROM audit WHERE ts >= ? AND ts < ?', (_iso(start),_iso(end))).fetchall() if include_evidence else []
-        trades = store.conn.execute('SELECT action,fee,pnl FROM trades WHERE ts >= ? AND ts < ?', (_iso(start),_iso(end))).fetchall()
+        trades = store.conn.execute('SELECT action,fee,pnl FROM trades WHERE ledger = ? AND ts >= ? AND ts < ?', (ledger, _iso(start),_iso(end))).fetchall()
     scans = [json.loads(r[0]) for r in scan_rows]
     scan_totals = {}
     for scan in scans:
         for key, value in scan.get('counts', {}).items():
             scan_totals[key] = scan_totals.get(key, 0) + value
-    opening = float(first['equity']) if first else store.bankroll
+    if first:
+        opening = float(first['equity'])
+    elif ledger == 'live':
+        opening = float(store._get('live_budget') or 0)
+    else:
+        opening = store.bankroll
     closing = float(current_equity) if current_equity is not None else float(last['equity']) if last else opening
     realized = sum(float(t['pnl']) for t in trades if t['action'] in {'sell','settle'})
     pnl = closing-opening

@@ -6,7 +6,7 @@
 
 A paper trading desk for high-probability Kalshi contracts. It starts with $1,000 of simulated cash, reads the public book, and buys only when a favorite still makes sense after the Kalshi fee and the settled record. The aim is to avoid the stupid trade, not to invent a clever one.
 
-This month is a paper evaluation of the algorithm, with live trading planned for a later version. The current process places simulated trades only. A Kalshi key is not required for the paper book. Public market data is enough. Finishing the month does not automatically enable real orders.
+The desk starts in paper mode. A Kalshi key is not required for the paper book. Public market data is enough. Switch to live trading on the dashboard: confirm the warning, choose $1 to $5,000, and approve. That amount is the most the desk may use. Orders then go to Kalshi with `CST_KALSHI_API_KEY_ID` and the PEM file at `CST_KALSHI_PRIVATE_KEY_PATH`.
 
 ## The rule
 
@@ -48,7 +48,7 @@ Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or t
 
 ## What the dashboard is showing
 
-The status line stays **Paper** and **Live planned**. There is no control that arms a live order. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips. The simulation record shows archived observations and historical sample sizes separately from this account's results. A fill is an open position, not a confirmed win.
+The status line stays **Paper** until you approve live trading. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips. The simulation record shows archived observations and historical sample sizes separately from this account's results. A fill is an open position, not a confirmed win.
 
 Open **Activity & analysis** for scan counts, reviews, and historical evidence. **Settings** contains controls and risk parameters. The scan splits its page budget across the next 24 hours, days 1–7, and days 7–21 within the configured limits. The earliest window receives twice the weight: four of the default eight pages. Each active contract still has to pass the entry rules. Coverage is partial.
 
@@ -73,7 +73,7 @@ The scan reads each favorite's series fee multiplier and applies `0.07 × multip
 When you are ready to talk about real orders, the names in `.env.example` are the ones to fill:
 
 - OpenAI: `CST_OPENAI_API_KEY`. Optional. It lets the Decisions call drop a duplicate clip and lets the chat note read the tape. The desk still runs without it. The Decisions model is `gpt-6-luna`. The chat model is `CST_OPENAI_MODEL`.
-- The Kalshi signing key is unused. This build does not send orders. Adding that is a later reviewed change, after the paper window has something to look at: hit rate, fees, drawdown, and how many clips actually resolved. A month of flat cash is a successful result if the book never offered a fee-adjusted edge.
+- Kalshi: `CST_KALSHI_API_KEY_ID` and `CST_KALSHI_PRIVATE_KEY_PATH`. Paper mode ignores them. Live mode signs orders with them after you approve an amount on the dashboard.
 
 ## Layout
 

@@ -442,5 +442,21 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .trade-story p.bad { color: var(--red); }
 
 .slider-bounds { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; margin-top: 2px; }
+dialog {
+  border: 1px solid rgba(224, 181, 106, 0.45);
+  background: var(--bg-2);
+  color: var(--cream);
+  border-radius: 16px;
+  padding: 24px;
+  width: min(440px, calc(100% - 32px));
+  box-shadow: var(--shadow);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
+dialog h2 { margin-bottom: 12px; }
+.live-warning { margin: 0 0 16px; color: var(--red); }
+#live-dialog label { display: block; color: var(--dim); }
+#live-amount-label { display: block; margin: 6px 0 8px; color: var(--brass-2); font-size: 1.6rem; }
+#live-amount { display: block; width: 100%; accent-color: var(--brass); cursor: pointer; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .knob-setting output { font-size: 1.05rem; }
 .settings-note { color: var(--muted); font-size: .75rem; margin: 16px 0 0; }

@@ -561,14 +561,20 @@ def test_a_foreign_websocket_origin_is_refused(tmp_path):
                 socket.receive_json()
 
 
-def test_source_never_places_an_order():
+def test_orders_are_sent_only_after_live_approval():
+    broker = Path("src/cst/broker.py").read_text()
     text = "\n".join(path.read_text() for path in Path("src/cst").rglob("*.py"))
     dashboard = "\n".join(path.read_text() for path in DASHBOARD.rglob("*") if path.suffix in {".html", ".js"})
-    assert "/portfolio/" not in text
+    assert "/portfolio/" not in broker
+    assert "/portfolio/events/orders" in Path("src/cst/live.py").read_text()
     assert "create_and_post_order" not in text
     assert "polymarket" not in text.lower()
     assert "approve-pair" not in text
     assert "Arm live" not in dashboard
+    assert 'id="live-dialog"' in dashboard
+    assert 'min="1"' in dashboard
+    assert 'max="5000"' in dashboard
+    assert "Approve" in dashboard
     assert "approve-pair" not in dashboard
     assert "Polymarket" not in dashboard
     assert "Kalshi" in dashboard

@@ -13,6 +13,7 @@ dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.4",
   "openai>=1.40",
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]

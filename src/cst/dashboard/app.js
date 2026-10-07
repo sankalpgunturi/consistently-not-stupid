@@ -45,9 +45,28 @@ function render(next) {
   const book = next.book || {};
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
   $("pause").textContent = next.operator_pause ? "Resume buys" : "Pause buys";
+  const liveButton = $("live");
+  if (next.mode === "live") {
+    liveButton.disabled = true;
+    liveButton.textContent = `Live · ${money(next.live_budget || 0, 0)}`;
+    liveButton.title = "Live trading is on for this amount.";
+  } else {
+    liveButton.disabled = false;
+    liveButton.textContent = "Switch to live trading";
+    liveButton.title = "Place real Kalshi orders up to an amount you approve.";
+  }
+  const modeNote = $("mode-note");
+  if (modeNote) {
+    modeNote.textContent = next.mode === "live"
+      ? `Kalshi live trading · ${money(next.live_budget || 0, 0)} approved`
+      : "Kalshi paper trading";
+  }
   const stamp = JSON.stringify({
     status: next.status,
     operator_pause: next.operator_pause,
+    mode: next.mode,
+    live_budget: next.live_budget,
+    live_exchange_balance: next.live_exchange_balance,
     paper_age_days: next.paper_age_days,
     evidence: next.evidence,
     book,
@@ -89,6 +108,10 @@ function render(next) {
   const messages = [];
   if (book.drawdown_pause) messages.push("New buys are paused. The book is under its peak by the pause line. Exits still run.");
   if (next.operator_pause) messages.push("New buys are paused by you. Exits still run.");
+  if (next.mode === "live" && Number.isFinite(Number(next.live_exchange_balance))
+      && Number(next.live_exchange_balance) + 1e-9 < Number(next.live_budget)) {
+    messages.push(`Kalshi balance is ${money(next.live_exchange_balance)}. Buys stop at the smaller of that and the ${money(next.live_budget, 0)} you approved.`);
+  }
   (next.errors || []).forEach((item) => messages.push(item));
   ((next.evidence || {}).errors || []).forEach((item) => {
     if (!messages.includes(item)) messages.push(item);
@@ -102,7 +125,7 @@ function render(next) {
 
   const counts = next.counts || {};
   $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
-    book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
+    book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : next.mode === "live" ? "Live" : "Running";
 
   drawProfit(next.realized_curve || []);
   renderKnobs(next.params || []);
@@ -335,6 +358,39 @@ $("more-trades").addEventListener("click", () => {
 
 $("pause").addEventListener("click", () => {
   post("/api/pause", { paused: !state?.operator_pause });
+});
+
+function showLiveAmount() {
+  const slider = $("live-amount");
+  const amount = Number(slider.value);
+  const label = money(amount, 0);
+  $("live-amount-label").textContent = label;
+  slider.setAttribute("aria-valuenow", String(amount));
+  slider.setAttribute("aria-valuetext", label);
+}
+
+$("live").addEventListener("click", () => {
+  if (state?.mode === "live") return;
+  showLiveAmount();
+  $("live-dialog").showModal();
+});
+
+$("live-amount").addEventListener("input", showLiveAmount);
+
+$("live-cancel").addEventListener("click", () => {
+  $("live-dialog").close();
+});
+
+$("live-approve").addEventListener("click", async () => {
+  const amount = Number($("live-amount").value);
+  const approve = $("live-approve");
+  approve.disabled = true;
+  $("live-dialog").close();
+  try {
+    await post("/api/live", { amount });
+  } finally {
+    approve.disabled = false;
+  }
 });
 
 document.body.addEventListener("click", async (event) => {

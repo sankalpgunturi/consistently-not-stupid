@@ -8,7 +8,7 @@ import hashlib
 import threading
 import time
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +23,8 @@ from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, m
 from cst.simulate import run_report
 from cst.store import Store
 from cst.strategy import _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
+from cst.fees import fee_for
+from cst.live import KalshiTrader, LiveTradingError, parse_live_amount
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
 
 log = logging.getLogger("cst.engine")
@@ -123,6 +125,8 @@ class Engine:
         self.depth = depth
         self.decider = decider
         self.refresher = None
+        self.trader = None
+        self._kalshi: KalshiTrader | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -352,7 +356,23 @@ class Engine:
                 # The model saw an earlier quote; the ledger explanation must
                 # describe the refreshed price that is actually being filled.
                 proposal.detail = _fee_ok(proposal.quote, fresh)[3]
-            trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
+            try:
+                trade, fill_detail = self._execute_buy(
+                    proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle,
+                )
+            except LiveTradingError as exc:
+                decisions.append(Decision(
+                    action="skipped",
+                    reason_code="venue",
+                    title=proposal.quote.title,
+                    venue=proposal.quote.venue,
+                    outcome=proposal.quote.outcome,
+                    detail=str(exc),
+                    price=proposal.quote.ask,
+                    edge=proposal.edge,
+                    key=proposal.key,
+                ))
+                continue
             if trade is None:
                 decisions.append(Decision(
                     action="skipped",
@@ -360,7 +380,7 @@ class Engine:
                     title=proposal.quote.title,
                     venue=proposal.quote.venue,
                     outcome=proposal.quote.outcome,
-                    detail="Cash was short of the venue minimum by the time this clip was reached.",
+                    detail=fill_detail or "Cash was short of the venue minimum by the time this clip was reached.",
                     price=proposal.quote.ask,
                     edge=proposal.edge,
                     key=proposal.key,
@@ -489,7 +509,7 @@ class Engine:
                     depth = self.check_depth(quote, position.shares, "sell")
                     if not depth.ok:
                         continue
-                    self.broker.sell(
+                    self._execute_sell(
                         position,
                         quote.bid,
                         f"The bid fell to {quote.bid:.2f}, {params.stop_gap * 100:.0f}¢ under the price we paid. The reason for the trade is gone.",
@@ -639,6 +659,56 @@ class Engine:
         )
         return self.snapshot(), None
 
+    def arm_live(self, amount) -> tuple[dict, str | None]:
+        dollars, error = parse_live_amount(amount)
+        if error:
+            return self.snapshot(), error
+        if self.store.trading_mode() == "live":
+            return self.snapshot(), "Live trading is already on."
+        try:
+            balance = self._trader().available_dollars()
+        except LiveTradingError as exc:
+            return self.snapshot(), str(exc)
+        self.store.arm_live(dollars, balance)
+        return self.snapshot(), None
+
+    def _trader(self):
+        if self.trader is not None:
+            return self.trader
+        if self._kalshi is None:
+            self._kalshi = KalshiTrader.from_settings(self.settings)
+        return self._kalshi
+
+    def _execute_buy(self, quote: Quote, shares: float, signal: str, reason: str, cycle: int):
+        if self.store.trading_mode() != "live":
+            return self.broker.buy(quote, shares, signal, reason, cycle), ""
+        fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
+        cost = shares * quote.ask + fee
+        if cost > self.store.cash() + 1e-9:
+            return None, "Cash was short of the venue minimum by the time this clip was reached."
+        execution = self._trader().buy(quote, shares, cost)
+        if not execution.filled:
+            return None, execution.detail or "Kalshi did not fill the order."
+        filled = replace(quote, ask=execution.price if execution.price is not None else quote.ask)
+        return self.broker.buy(filled, execution.shares, signal, reason, cycle), ""
+
+    def _execute_sell(self, position, bid: float, reason: str):
+        if self.store.trading_mode() == "live":
+            try:
+                execution = self._trader().sell(position, bid)
+            except LiveTradingError:
+                return None
+            if not execution.filled or execution.shares <= 0:
+                return None
+            if execution.shares + 1e-9 < position.shares:
+                ratio = execution.shares / position.shares
+                position.shares = execution.shares
+                position.cost_basis = round(position.cost_basis * ratio, 6)
+                position.fees = round(position.fees * ratio, 6)
+            if execution.price is not None:
+                bid = execution.price
+        return self.broker.sell(position, bid, reason)
+
     def close_position(self, position_id: str) -> tuple[bool, str]:
         with self._lock:
             position = next((item for item in self.store.positions() if item.id == position_id), None)
@@ -650,8 +720,10 @@ class Engine:
             depth = self.check_depth(quote, position.shares, "sell")
             if not depth.ok:
                 return False, depth.detail
-            self.broker.sell(position, quote.bid, "Closed by the operator.")
-            self.store.append_audit("operator", "close", position_id, "closed", "Manual paper close.")
+            trade = self._execute_sell(position, quote.bid, "Closed by the operator.")
+            if trade is None:
+                return False, "The close was not filled, so the clip stayed open."
+            self.store.append_audit("operator", "close", position_id, "closed", "Manual close.")
             return True, ""
 
     def _paused(self, params: StrategyParams) -> bool:
@@ -711,13 +783,17 @@ class Engine:
             {"bucket": bucket, "wins": wins, "samples": count, "lower_bound": wilson_lower(wins, count)}
             for bucket, (wins, count) in sorted(self.store.calibration().items())
         ]
+        mode = self.store.trading_mode()
+        start = self.store.live_budget() if mode == "live" else float(self.settings.bankroll)
         return {
             "daily": current_day(self.store, equity),
             "last_24h": rolling_day(self.store, equity),
             "benchmark": benchmark_snapshot(self.store, equity),
             "name": "Consistently Not Stupid",
-            "mode": "paper",
-            "live": "unavailable",
+            "mode": mode,
+            "live": "on" if mode == "live" else "unavailable",
+            "live_budget": self.store.live_budget(),
+            "live_exchange_balance": self.store.exchange_balance(),
             "csrf": self.store.csrf(),
             "paper_started_at": started,
             "paper_age_days": round(age_days, 2),
@@ -726,9 +802,9 @@ class Engine:
             "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "next_scan_at": info.get("next_scan_at") or self._next_scan.isoformat(timespec="seconds"),
             "book": {
-                "start": float(self.settings.bankroll),
+                "start": start,
                 "equity": round(equity, 6),
-                "growth_multiple": equity / float(self.settings.bankroll) if self.settings.bankroll else None,
+                "growth_multiple": equity / start if start else None,
                 "cash": round(self.store.cash(), 2),
                 "deployed": round(sum(item.cost_basis for item in positions), 2),
                 "realized": round(self.store.realized(), 2),

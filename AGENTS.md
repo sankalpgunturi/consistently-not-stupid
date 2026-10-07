@@ -1,6 +1,6 @@
 # Consistently Not Stupid
 
-Paper desk for high-probability Kalshi contracts. The aim is to be consistently not stupid, instead of trying to be very intelligent. Live orders are not implemented. The import package and the `cst` command stay `cst`.
+Paper desk for high-probability Kalshi contracts. The aim is to be consistently not stupid, instead of trying to be very intelligent. Live orders are sent only after the operator approves $1 to $5,000 on the dashboard. The import package and the `cst` command stay `cst`.
 
 ## Commands
 
@@ -19,7 +19,7 @@ Paper desk for high-probability Kalshi contracts. The aim is to be consistently 
 
 ## Do not
 
-- Add an order POST, a signing path, or an arm control. Public Kalshi reads are the only venue calls.
+- Send an order while the book is in paper mode, or approve live trading outside $1 to $5,000. Signed orders live in `src/cst/live.py` and use `CST_KALSHI_API_KEY_ID` and `CST_KALSHI_PRIVATE_KEY_PATH`.
 - Let a model add a buy. It may only drop one the deterministic rule already proposed.
 - Loosen a knob, or move `min_probability` below 0.90. Overrides tighten one step inside `RAILS`.
 - The ten-minute paper experiment admits quoted favorites without a historical-evidence gate, as explicitly requested by the user. Retain prospective observations for analysis, not admission. Legacy replay keeps its historical rule. Preserve probability, timing, fee, liquidity, stability, exposure and execution checks.
