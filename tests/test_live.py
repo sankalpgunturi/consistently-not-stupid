@@ -270,8 +270,15 @@ def test_dashboard_offers_the_amount_dialog():
     script = Path("src/cst/dashboard/app.js").read_text()
     assert "Switch to live trading?" in page
     assert 'id="live-amount"' in page
+    assert 'type="text"' in page
+    assert 'id="live-error"' in page
+    assert 'type="range"' not in page
     assert 'min="1"' in page and 'max="5000"' in page
     assert "Approve" in page
     assert "/api/live" in script
+    assert 'post("/api/live"' not in script
+    handler = script.split('$("live-approve").addEventListener', 1)[1]
+    assert "window.alert" not in handler
+    assert "showLiveError" in handler
     button = next(line for line in page.splitlines() if 'id="live"' in line)
     assert "disabled" not in button

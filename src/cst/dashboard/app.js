@@ -34,13 +34,20 @@ const expandedTrades = new Set();
 const knobDrafts = new Map();
 let knobBusy = false;
 let knobRenderStamp = "";
+let liveAwaiting = false;
 
 function render(next) {
   state = next;
   if (pendingCommand && next.last_command?.id === pendingCommand) {
     pendingCommand = null;
     lastStamp = "";
-    if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
+    if (liveAwaiting) {
+      liveAwaiting = false;
+      const approve = $("live-approve");
+      if (approve) approve.disabled = false;
+      if (!next.last_command.ok) showLiveError(next.last_command.error || "The desk refused that change.");
+      else $("live-dialog").close();
+    } else if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
   }
   const book = next.book || {};
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
@@ -360,36 +367,71 @@ $("pause").addEventListener("click", () => {
   post("/api/pause", { paused: !state?.operator_pause });
 });
 
-function showLiveAmount() {
-  const slider = $("live-amount");
-  const amount = Number(slider.value);
-  const label = money(amount, 0);
-  $("live-amount-label").textContent = label;
-  slider.setAttribute("aria-valuenow", String(amount));
-  slider.setAttribute("aria-valuetext", label);
+function showLiveError(message) {
+  const error = $("live-error");
+  if (error) error.textContent = message || "";
+}
+
+function liveAmount() {
+  const raw = $("live-amount").value.trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const amount = Number(raw);
+  if (amount < 1 || amount > 5000) return null;
+  return amount;
 }
 
 $("live").addEventListener("click", () => {
   if (state?.mode === "live") return;
-  showLiveAmount();
+  $("live-amount").value = "1";
+  showLiveError("");
   $("live-dialog").showModal();
+  $("live-amount").focus();
+  $("live-amount").select();
 });
-
-$("live-amount").addEventListener("input", showLiveAmount);
 
 $("live-cancel").addEventListener("click", () => {
   $("live-dialog").close();
 });
 
+$("live-amount").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    $("live-approve").click();
+  }
+});
+
 $("live-approve").addEventListener("click", async () => {
-  const amount = Number($("live-amount").value);
+  const amount = liveAmount();
+  if (amount === null) {
+    showLiveError("Enter a whole dollar amount from $1 to $5,000.");
+    return;
+  }
   const approve = $("live-approve");
   approve.disabled = true;
-  $("live-dialog").close();
+  showLiveError("");
   try {
-    await post("/api/live", { amount });
+    const response = await fetch("/api/live", {
+      method: "POST",
+      headers: { "X-CSRF-Token": state?.csrf || "", "Content-Type": "application/json" },
+      body: JSON.stringify({ amount }),
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_err) { payload = null; }
+    if (response.status === 202) {
+      pendingCommand = payload?.id || null;
+      liveAwaiting = true;
+      showLiveError("Waiting for the desk.");
+      return;
+    }
+    if (!response.ok) {
+      showLiveError(payload?.error || "The desk refused that change.");
+      if (payload?.state) render(payload.state);
+      return;
+    }
+    if (payload) render(payload);
+    $("live-dialog").close();
   } finally {
-    approve.disabled = false;
+    if (!liveAwaiting) approve.disabled = false;
   }
 });
 
