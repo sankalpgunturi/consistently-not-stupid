@@ -33,6 +33,7 @@ let tradeLimit = 5;
 const expandedTrades = new Set();
 const knobDrafts = new Map();
 let knobBusy = false;
+let knobRenderStamp = "";
 
 function render(next) {
   state = next;
@@ -109,7 +110,10 @@ function render(next) {
 }
 
 function renderKnobs(rows) {
-  // Preserve an unsent slider choice while fresh quotes update the page.
+  // Do not replace focused/dragged controls when only market data changes.
+  const stamp = JSON.stringify({rows, disabled: knobBusy || Boolean(pendingCommand)});
+  if (stamp === knobRenderStamp) return;
+  knobRenderStamp = stamp;
   $("knobs").innerHTML = rows.map(row => {
     let draft = knobDrafts.get(row.key);
     if (draft && draft.current !== row.value) { knobDrafts.delete(row.key); draft = null; }
@@ -119,7 +123,7 @@ function renderKnobs(rows) {
     return `<div class="knob">
       <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.label)}</label>
       <output id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
-      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="${Math.min(row.value, row.next_value)}" max="${Math.max(row.value, row.next_value)}" step="${Math.abs(row.next_value-row.value)}" value="${value}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>` : ''}</div>
+      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="1" step="1" value="${value === Math.min(row.value, row.next_value) ? 0 : 1}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>` : ''}</div>
       ${adjustable ? `<button class="mini" data-tighten="${esc(row.key)}" ${!changed || knobBusy || pendingCommand ? 'disabled' : ''}>Apply</button>` : ''}
     </div>`;
   }).join("");
@@ -129,7 +133,7 @@ $("knobs").addEventListener("input", event => {
   const input = event.target;
   const row = state?.params?.find(row => row.key === input.dataset.knob);
   if (!row) return;
-  const value = Number(input.value);
+  const value = Number(input.value) === 0 ? Math.min(row.value, row.next_value) : Math.max(row.value, row.next_value);
   knobDrafts.set(row.key, {current: row.value, value});
   const label = formatKnob({...row, value});
   $("value-" + row.key).textContent = label;
