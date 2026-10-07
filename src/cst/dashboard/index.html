@@ -47,15 +47,15 @@
     </section>
 
     <details class="card disclosure settings">
-      <summary>Strategy &amp; settings</summary>
-      <dl id="strategy" class="strategy-grid"></dl>
-      <div class="controls-row">
-        <button type="button" id="scan" class="btn">Scan now</button>
-      </div>
+      <summary>Settings</summary>
       <div class="knobs" id="knobs"></div>
     </details>
 
   </main>
+  <dialog id="trade-drawer" class="trade-drawer" aria-labelledby="trade-drawer-title">
+    <header class="drawer-header"><h2 id="trade-drawer-title"></h2><button type="button" id="close-trade-drawer" aria-label="Close trade details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+    <div id="trade-drawer-body"></div>
+  </dialog>
   <footer class="foot"><p>Kalshi paper trading</p></footer>
   <script src="/static/app.js"></script>
 </body>

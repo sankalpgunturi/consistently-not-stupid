@@ -518,7 +518,8 @@ def test_dashboard_and_health(tmp_path):
         page = client.get("/")
         assert page.status_code == 200
         assert "Consistently Not Stupid" in page.text
-        assert "Scan now" in page.text
+        assert 'id="scan"' not in page.text
+        assert 'id="pause"' in page.text
         assert "Pause buys" in page.text
         assert "Polymarket" not in page.text
         state = client.get("/api/state")

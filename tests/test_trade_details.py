@@ -22,6 +22,7 @@ def test_visible_settings_tighten_through_api_and_persist(tmp_path):
                 continue
             key = row['key']
             expected = tighten_value(engine.store.params(), key)
+            assert row['next_value'] == pytest.approx(expected) if expected is not None else row['next_value'] is None
             before = getattr(engine.store.params(), key)
             assert client.post('/api/knob', json={'key': key}).status_code == 403
             response = client.post('/api/knob', headers=headers, json={'key': key})

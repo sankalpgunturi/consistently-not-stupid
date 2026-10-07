@@ -697,6 +697,7 @@ class Engine:
                 "min": lo,
                 "max": hi,
                 "adjustable": key != "scan_interval_seconds",
+                "next_value": tighten_value(params, key) if key != "scan_interval_seconds" else None,
             })
         if params.entry_window_minutes > 0:
             param_rows.insert(0, {"key": "entry_window_minutes", "label": "Outcome within",

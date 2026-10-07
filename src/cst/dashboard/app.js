@@ -30,12 +30,16 @@ let state = null;
 let lastStamp = "";
 let pendingCommand = null;
 let tradeLimit = 5;
-const expandedTrades = new Set();
+const tradeDetails = new Map();
+let selectedTrade = null;
+const knobDrafts = new Map();
+let knobBusy = false;
 
 function render(next) {
   state = next;
   if (pendingCommand && next.last_command?.id === pendingCommand) {
     pendingCommand = null;
+    lastStamp = "";
     if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
   }
   const book = next.book || {};
@@ -98,36 +102,40 @@ function render(next) {
   const counts = next.counts || {};
   $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
     book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
-  renderStrategy(next);
 
   drawProfit(next.realized_curve || []);
   renderKnobs(next.params || []);
   renderTrades(next.trades || [], next.positions || []);
 }
 
-function renderStrategy(next) {
-  const params = Object.fromEntries((next.params || []).map(row => [row.key, row.value]));
-  const rows = [
-    ["Quoted probability", `${Math.round((params.min_probability ?? .90) * 100)}% or higher`],
-    ["Outcome expected", `Within ${params.entry_window_minutes ?? 10} minutes`],
-    ["Bet size", "1 contract · spread across distinct risks"],
-    ["Exit", "Hold to the official result"],
-    ["Capital", `${money(next.book?.start ?? 1000)} · reinvest proceeds · no top-ups`],
-    ["Daily target", "Break even or better after fees · review losses"],
-  ];
-  $("strategy").innerHTML = rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
-}
-
 function renderKnobs(rows) {
-  $("knobs").innerHTML = rows.map((row) => `
-    <div class="knob">
-      <div><b>${esc(row.label)}</b>
-      <em>${esc(formatKnob(row))}</em></div>
-
-      ${row.adjustable === false ? "" : `<button type="button" class="mini" data-tighten="${esc(row.key)}">Tighten</button>`}
-    </div>
-  `).join("");
+  // Preserve an unsent slider choice while fresh quotes update the page.
+  $("knobs").innerHTML = rows.map(row => {
+    let draft = knobDrafts.get(row.key);
+    if (draft && draft.current !== row.value) { knobDrafts.delete(row.key); draft = null; }
+    const value = draft?.value ?? row.value;
+    const adjustable = row.adjustable !== false && Number.isFinite(row.next_value) && row.next_value !== row.value;
+    const changed = value !== row.value;
+    return `<div class="knob">
+      <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.label)}</label>
+      <output id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
+      ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="${Math.min(row.value, row.next_value)}" max="${Math.max(row.value, row.next_value)}" step="${Math.abs(row.next_value-row.value)}" value="${value}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Tighten one step, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>` : ''}</div>
+      ${adjustable ? `<button class="mini" data-tighten="${esc(row.key)}" ${!changed || knobBusy || pendingCommand ? 'disabled' : ''}>Apply</button>` : ''}
+    </div>`;
+  }).join("");
 }
+
+$("knobs").addEventListener("input", event => {
+  const input = event.target;
+  const row = state?.params?.find(row => row.key === input.dataset.knob);
+  if (!row) return;
+  const value = Number(input.value);
+  knobDrafts.set(row.key, {current: row.value, value});
+  const label = formatKnob({...row, value});
+  $("value-" + row.key).textContent = label;
+  input.setAttribute("aria-valuetext", label);
+  input.closest(".knob").querySelector("button").disabled = value === row.value;
+});
 
 function formatKnob(row) {
   const value = Number(row.value);
@@ -187,12 +195,17 @@ function renderTrades(rows, positions = []) {
     const profitIfWin = position?.profit_if_win;
     const profit = exit ? exit.pnl : profitIfWin;
     const tradeId = entry?.id || position?.id || exit.id;
-    const expanded = expandedTrades.has(tradeId);
     const review = state?.trade_reviews?.[entry?.id];
-    const detailId = `detail-${tradeId}`;
     const reviewText = review?.summary || "No model review recorded for this entry.";
+    tradeDetails.set(tradeId, {title: row.title, html: `
+      <div class="trade-detail-body">
+        <dl class="trade-facts"><div><dt>Pick</dt><dd>${esc((row.side || '—').toUpperCase())}</dd></div><div><dt>Paid</dt><dd>${esc(paid)}</dd></div><div><dt>Status</dt><dd>${esc(result)}</dd></div></dl>
+        <div><b>Entry</b><p>${esc(entry?.reason || "Entry explanation unavailable.")}</p></div>
+        <div><b>${exit ? 'Outcome' : 'At settlement'}</b><p>${esc(exit?.reason || `${cents(position?.cost_basis || 0)} paid → ${cents(position?.shares || 0)} returned if won; zero if lost.`)}</p></div>
+        <div><b>${esc(review?.context || 'Review')}</b><p>${esc(reviewText)}</p>${review?.ts ? `<small>${esc(new Date(review.ts).toLocaleString())}</small>` : ''}</div>
+      </div>`});
     return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}">
-      <td class="title" data-label="Trade"><button class="trade-toggle" data-trade-toggle="${esc(tradeId)}" aria-expanded="${expanded}" aria-controls="${esc(detailId)}">${esc(row.title)}<span aria-hidden="true">${expanded ? "−" : "+"}</span></button></td>
+      <td class="title" data-label="Trade"><button class="trade-toggle" data-trade-toggle="${esc(tradeId)}" aria-haspopup="dialog" aria-controls="trade-drawer">${esc(row.title)}<span aria-hidden="true">↗</span></button></td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
@@ -200,14 +213,9 @@ function renderTrades(rows, positions = []) {
       <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<span class="close-estimate">Expected</span>' : ''}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
       <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<span class="close-estimate">Expected</span>' : ''}</td>
-    </tr><tr id="${esc(detailId)}" class="trade-detail ${expanded ? '' : 'hidden'}"><td colspan="8">
-      <div class="trade-detail-body">
-        <div><b>Entry</b><p>${esc(entry?.reason || "Entry explanation unavailable.")}</p></div>
-        <div><b>${exit ? 'Outcome' : 'At settlement'}</b><p>${esc(exit?.reason || `${cents(position?.cost_basis || 0)} paid → ${cents(position?.shares || 0)} returned if won; zero if lost.`)}</p></div>
-        <div><b>${esc(review?.context || 'Review')}</b><p>${esc(reviewText)}</p>${review?.ts ? `<small>${esc(new Date(review.ts).toLocaleString())}</small>` : ''}</div>
-      </div>
-    </td></tr>`;
+    </tr>`;
   }).join("");
+  if ($("trade-drawer").open) updateTradeDrawer();
 }
 
 function drawProfit(points) {
@@ -271,29 +279,37 @@ async function post(url, body) {
   return payload;
 }
 
+function updateTradeDrawer() {
+  const detail = tradeDetails.get(selectedTrade);
+  if (!detail) return;
+  $("trade-drawer-title").textContent = detail.title;
+  const body = $("trade-drawer-body");
+  if (body.innerHTML !== detail.html) body.innerHTML = detail.html;
+}
+
 $("trades").addEventListener("click", event => {
   const row = event.target.closest(".trade-row");
   if (!row) return;
-  const id = row.dataset.trade;
-  if (expandedTrades.has(id)) expandedTrades.delete(id); else expandedTrades.add(id);
-  renderTrades(state?.trades || [], state?.positions || []);
-  document.querySelector(`[data-trade-toggle="${CSS.escape(id)}"]`)?.focus({preventScroll: true});
+  selectedTrade = row.dataset.trade;
+  updateTradeDrawer();
+  $("trade-drawer").showModal();
+  document.documentElement.classList.add("drawer-open");
+  $("close-trade-drawer").focus({preventScroll: true});
+});
+$("close-trade-drawer").addEventListener("click", () => $("trade-drawer").close());
+$("trade-drawer").addEventListener("click", event => {
+  const box = $("trade-drawer").getBoundingClientRect();
+  if (event.target === $("trade-drawer") && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)) $("trade-drawer").close();
+});
+$("trade-drawer").addEventListener("close", () => {
+  document.documentElement.classList.remove("drawer-open");
+  document.querySelector(`[data-trade-toggle="${CSS.escape(selectedTrade || '')}"]`)?.focus({preventScroll: true});
+  selectedTrade = null;
 });
 
 $("more-trades").addEventListener("click", () => {
   tradeLimit += 5;
   renderTrades(state?.trades || [], state?.positions || []);
-});
-
-$("scan").addEventListener("click", async () => {
-  $("scan").disabled = true;
-  $("scan").textContent = "Scanning";
-  try {
-    await post("/api/scan");
-  } finally {
-    $("scan").disabled = false;
-    $("scan").textContent = "Scan now";
-  }
 });
 
 $("pause").addEventListener("click", () => {
@@ -307,7 +323,13 @@ document.body.addEventListener("click", async (event) => {
     await post("/api/block", { key: target.dataset.block });
 
   } else if (target.dataset.tighten) {
-    await post("/api/knob", { key: target.dataset.tighten });
+    const key = target.dataset.tighten;
+    const draft = knobDrafts.get(key);
+    if (knobBusy || pendingCommand || !draft || draft.value === draft.current) return;
+    knobBusy = true;
+    renderKnobs(state?.params || []);
+    try { await post("/api/knob", { key }); }
+    finally { knobBusy = false; knobDrafts.delete(key); renderKnobs(state?.params || []); }
   }
 });
 
