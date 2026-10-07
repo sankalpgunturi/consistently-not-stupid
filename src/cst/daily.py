@@ -7,6 +7,27 @@ def _iso(value):
     return value.isoformat(timespec='seconds')
 
 
+def model_usage_totals(scans):
+    """Aggregate reported usage only; absent usage is not a zero-cost call."""
+    totals = {}
+    for scan in scans:
+        for role in ('retrospective', 'correlation'):
+            entry = scan.get('model_usage', {}).get(role) or {}
+            usage = entry.get('usage')
+            if not isinstance(usage, dict):
+                continue
+            key = (role, entry.get('model', 'unknown'))
+            row = totals.setdefault(key, dict(role=role, model=key[1],
+                calls_with_usage=0, input_tokens=0, output_tokens=0, total_tokens=0))
+            row['calls_with_usage'] += 1
+            incoming = usage.get('input_tokens', usage.get('prompt_tokens', 0)) or 0
+            outgoing = usage.get('output_tokens', usage.get('completion_tokens', 0)) or 0
+            row['input_tokens'] += incoming
+            row['output_tokens'] += outgoing
+            row['total_tokens'] += usage.get('total_tokens', incoming + outgoing) or 0
+    return list(totals.values())
+
+
 def period_report(store, start, end, *, current_equity=None, include_evidence=True):
     with store.lock:
         first = store.conn.execute('SELECT ts,equity FROM equity WHERE ts <= ? ORDER BY id DESC LIMIT 1', (_iso(start),)).fetchone()
@@ -28,6 +49,9 @@ def period_report(store, start, end, *, current_equity=None, include_evidence=Tr
         'net_pnl':round(pnl,6), 'return_pct':round(pnl/opening*100,6) if opening else None,
         'realized_pnl':round(realized,6), 'unrealized_change':round(pnl-realized,6),
         'operating_costs_included':False,
+        'model_usage':model_usage_totals(scans) if include_evidence else None,
+        'operating_cost_usd':None,
+        'model_usage_note':'Reported token usage only; missing usage and unknown billing are not zero cost.',
         'fees_paid':round(sum(float(t['fee']) for t in trades),6),
         'buys':sum(t['action']=='buy' for t in trades),
         'closed_trades':sum(t['action'] in {'sell','settle'} for t in trades),

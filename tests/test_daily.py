@@ -86,3 +86,26 @@ def test_rolling_24h_uses_prior_balance_not_original_capital(tmp_path):
     assert early['net_pnl']==100
     assert early['multiple']==1.1
     assert early['partial'] is True
+
+
+def test_daily_aggregates_both_usage_formats_without_changing_trading_profit(tmp_path):
+    store = seeded(tmp_path)
+    records = [
+        {'retrospective': {'model': 'review-model', 'usage': {'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}}},
+        {'retrospective': {'model': 'review-model', 'usage': {'input_tokens': 50, 'output_tokens': 10}},
+         'correlation': {'model': 'veto-model', 'usage': {'input_tokens': 30, 'total_tokens': 30}}},
+        {'retrospective': {'model': 'review-model', 'usage': None}},
+    ]
+    for index, usage in enumerate(records):
+        store.conn.execute('INSERT INTO scans VALUES (?,?,?)',
+            (index, (NOW + timedelta(hours=1)).isoformat(timespec='seconds'), json.dumps({'model_usage': usage})))
+    store.conn.commit()
+    mark(store, 23.99, 1001)
+    day = evaluate_days(store, NOW + timedelta(hours=24))[0]
+    by_role = {row['role']: row for row in day['model_usage']}
+    assert by_role['retrospective'] == dict(role='retrospective', model='review-model',
+        calls_with_usage=2, input_tokens=150, output_tokens=30, total_tokens=180)
+    assert by_role['correlation']['total_tokens'] == 30
+    assert day['operating_cost_usd'] is None
+    assert day['net_pnl'] == 1
+    assert current_day(store, 1001, NOW + timedelta(hours=2))['model_usage'] is None
