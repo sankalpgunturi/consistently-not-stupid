@@ -169,31 +169,41 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     return quotes
 
 
-def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None) -> tuple[list[Quote], str | None]:
+def fetch_kalshi(base_url: str, pages: int, page_size: int, http: MarketHttp | None = None, close_window: tuple[int, int] | None = None, close_windows: list[tuple[int, int]] | None = None) -> tuple[list[Quote], str | None]:
     own = http is None
     client = http or MarketHttp()
     quotes: list[Quote] = []
     root = base_url.rstrip("/")
     try:
-        cursor = ""
-        markets: list[dict] = []
-        for _ in range(pages):
-            params = {"status": "open", "limit": str(page_size), "mve_filter": "exclude"}
-            if close_window is not None:
-                # Kalshi's close-time filters cannot be combined with status=open.
-                # Filter active markets locally after applying the time window.
-                params.pop("status")
-                params.update(min_close_ts=str(close_window[0]), max_close_ts=str(close_window[1]))
-            if cursor:
-                params["cursor"] = cursor
-            payload = client.get_json(f"{root}/markets", params=params)
-            if not isinstance(payload, dict):
-                break
-            batch = payload.get("markets") or []
-            markets.extend(item for item in batch if item.get("status") in {"active", "open"})
-            cursor = payload.get("cursor") or ""
-            if not cursor or not batch:
-                break
+        windows = close_windows or [close_window]
+        # Round-robin allocation gives the earliest window twice the weight.
+        # The default eight-page budget becomes four near, two medium, two far.
+        pattern = list(range(len(windows))) + [0]
+        budgets = [0] * len(windows)
+        for index in range(max(0, pages)):
+            budgets[pattern[index % len(pattern)]] += 1
+        unique: dict[str, dict] = {}
+        for window, budget in zip(windows, budgets):
+            cursor = ""
+            for _ in range(budget):
+                params = {"status": "open", "limit": str(page_size), "mve_filter": "exclude"}
+                if window is not None:
+                    # Close-time filters cannot be combined with status=open.
+                    params.pop("status")
+                    params.update(min_close_ts=str(window[0]), max_close_ts=str(window[1]))
+                if cursor:
+                    params["cursor"] = cursor
+                payload = client.get_json(f"{root}/markets", params=params)
+                if not isinstance(payload, dict):
+                    break
+                batch = payload.get("markets") or []
+                for item in batch:
+                    if isinstance(item, dict) and item.get("ticker") and item.get("status") in {"active", "open"}:
+                        unique[item["ticker"]] = item
+                cursor = payload.get("cursor") or ""
+                if not cursor or not batch:
+                    break
+        markets = list(unique.values())
         events = _event_titles(client, root, markets)
         series, fee_errors = _series_fees(client, root, markets)
         for market in markets:

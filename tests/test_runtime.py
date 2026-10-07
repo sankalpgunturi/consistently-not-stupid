@@ -8,7 +8,7 @@ from cst.broker import PaperBroker
 from cst.store import Store
 from cst.models import StrategyParams
 from cst.models import Decision
-from cst.engine import refusal_counts
+from cst.engine import refusal_counts, discovery_windows
 from cst.venues.kalshi import fetch_kalshi
 from tests.conftest import make_quote
 
@@ -145,3 +145,30 @@ def test_read_only_report_reconciles_a_completed_trade(tmp_path):
     assert result["opened_trades"] == 1
     assert result["settlements"] == 1
     assert result["realized_pnl"] == pytest.approx(0.05)
+
+
+def test_discovery_covers_near_medium_and_far_with_independent_cursors():
+    calls = []
+    market = {"ticker": "KXTEST", "status": "active", "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.41"}
+    windows = [(100, 200), (199, 300), (299, 400)]
+
+    class Http:
+        def get_json(self, _url, params=None):
+            calls.append(dict(params))
+            bucket = params["min_close_ts"]
+            page = sum(c["min_close_ts"] == bucket for c in calls)
+            assert params.get("cursor") == (f"{bucket}-{page-1}" if page > 1 else None)
+            # A shared boundary ticker must appear only once in the result.
+            return {"markets": [market, dict(market, ticker=f"M{bucket}-{page}")], "cursor": f"{bucket}-{page}"}
+
+    quotes, error = fetch_kalshi("https://example.invalid", 8, 200, http=Http(), close_windows=windows)
+    assert error is None
+    assert len(calls) == 8
+    assert [sum(c["min_close_ts"] == str(lo) for c in calls) for lo, _ in windows] == [4, 2, 2]
+    assert len([q for q in quotes if q.market_id == "KXTEST"]) == 1
+
+
+def test_discovery_window_boundaries_respect_configured_limits():
+    windows = discovery_windows(0, 2, 21)
+    assert windows == [(7200, 86400), (86399, 604800), (604799, 1814400)]
+    assert discovery_windows(0, 2, 3) == [(7200, 86400), (86399, 259200)]

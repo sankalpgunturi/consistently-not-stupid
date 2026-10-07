@@ -50,7 +50,7 @@ Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or t
 
 The status line stays **Paper** and **Live planned**. There is no control that arms a live order. The strip under the thesis is the paper window: day count, net P&L after fees, resolved trades, hit rate, drawdown, and cash still in open clips. The simulation record shows archived observations and historical sample sizes separately from this account's results. A fill is an open position, not a confirmed win.
 
-Open **Activity & analysis** for scan counts, reviews, and historical evidence. **Settings** contains controls and risk parameters. The scan reads a bounded number of market pages within the configured closing-time window, then checks each active contract against the current rules. It does not cover every contract.
+Open **Activity & analysis** for scan counts, reviews, and historical evidence. **Settings** contains controls and risk parameters. The scan splits its page budget across the next 24 hours, days 1–7, and days 7–21 within the configured limits. The earliest window receives twice the weight: four of the default eight pages. Each active contract still has to pass the entry rules. Coverage is partial.
 
 You can pause new buys, block a contract, close a paper clip when the book has size, and tighten a risk knob by one step. You cannot force a buy the fee rule or the settled record refused. Those changes are listed under "What changed by hand." Mutating requests send the token from the page's own state.
 

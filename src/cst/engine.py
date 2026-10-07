@@ -34,10 +34,23 @@ def refusal_counts(decisions: list[Decision]) -> dict[str, int]:
     return dict(counts)
 
 
+def discovery_windows(now: float, min_hours: float, max_days: float) -> list[tuple[int, int]]:
+    lower = int(now + min_hours * 3600)
+    upper = int(now + max_days * 86400)
+    boundaries = [int(now + day * 86400) for day in (1, 7) if lower < now + day * 86400 < upper]
+    windows = []
+    for boundary in boundaries + [upper]:
+        if boundary > lower:
+            windows.append((lower, boundary))
+            # Overlap one second; discovery deduplicates tickers at boundaries.
+            lower = boundary - 1
+    return windows
+
+
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     now = datetime.now(timezone.utc).timestamp()
-    window = (int(now + settings.min_hours_to_expiry * 3600), int(now + settings.max_days_to_expiry * 86400))
-    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_window=window)
+    windows = discovery_windows(now, settings.min_hours_to_expiry, settings.max_days_to_expiry)
+    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_windows=windows)
     return quotes, [err] if err else []
 
 
