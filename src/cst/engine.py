@@ -12,9 +12,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cst.broker import PaperBroker
+from cst.benchmark import refresh_benchmark, snapshot as benchmark_snapshot
 from cst.config import Settings
 from cst.decisions import veto_proposals
 from cst.depth import live_depth
+from cst.daily import current_day, evaluate_days, save_reviews, rolling_day
 from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
@@ -50,6 +52,10 @@ def discovery_windows(now: float, min_hours: float, max_days: float) -> list[tup
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     now = datetime.now(timezone.utc).timestamp()
     windows = discovery_windows(now, settings.min_hours_to_expiry, settings.max_days_to_expiry)
+    if settings.entry_window_minutes > 0:
+        # Close-time is a discovery hint only; entry requires expected resolution.
+        windows = [(int(now), int(now + 600)), (int(now + 600), int(now + 3600)),
+                   (int(now + 3600), int(now + 86400)), None]
     quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size, close_windows=windows)
     return quotes, [err] if err else []
 
@@ -207,15 +213,24 @@ class Engine:
         self.store.set_status("scanning")
         started = time.time()
         params = self.store.params()
-        quotes, errors = self.fetcher(self.settings)
+        if self.fetcher is default_fetch:
+            refresh_benchmark(self.store)
+        fetch_settings = self.settings.model_copy(update={"entry_window_minutes": params.entry_window_minutes})
+        quotes, errors = self.fetcher(fetch_settings)
         retrieved_at = datetime.now(timezone.utc)
-        history_error = self._refresh_history()
+        if params.entry_window_minutes > 0:
+            from cst.near_resolution import observe_and_resolve
+            history_error = observe_and_resolve(self.store, self.settings, quotes, params, retrieved_at,
+                                               resolve=self.history is not None)
+        else:
+            history_error = self._refresh_history()
         if history_error:
             errors.append(history_error)
         cycle = self.store.next_cycle()
         streaks = self.store.observe(cycle, [q.key for q in quotes if quote_in_band(q, params)])
         book = self.store.book(streaks)
         evaluated_at = datetime.now(timezone.utc)
+        days = evaluate_days(self.store, evaluated_at)
         result = evaluate(quotes, params, book, now=evaluated_at)
         veto = self._veto(result.proposals)
         kept, vetoed = drop_proposals(result.proposals, veto, reason_code="veto")
@@ -226,6 +241,11 @@ class Engine:
                 "positions": [item.to_json() for item in book.positions],
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
+                "strategy_thesis": "90%+ favorites, outcome expected within ten minutes, small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
+                "daily_evaluations": days,
+                "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
+                "near_resolution_evidence": self.store.research_summary()["near_resolution"],
+                "calibration_source": "Prospective first eligible quote per event in the entry window; independent from old two-hour history. Different events may still correlate." if params.entry_window_minutes > 0 else "Legacy pre-close trade history",
                 "venue_errors": errors,
                 "refusals": refusal_counts(result.decisions),
                 "refusal_counts_are_disjoint": True,
@@ -243,12 +263,22 @@ class Engine:
         drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
         if getattr(self.reviewer, "last_error", None):
             errors.append(self.reviewer.last_error)
+        save_reviews(self.store, days, model_summary or "Model review unavailable; deterministic daily metrics saved.",
+                     getattr(self.reviewer, "concerns", []),
+                     getattr(self.reviewer, "last_error", None) or (None if model_summary else "No model summary"))
         kept, dropped_decisions = drop_proposals(kept, drops)
         decisions = [item for item in result.decisions if item.action != "bought"]
         decisions = vetoed + dropped_decisions + decisions
         bought = 0
         filled: set[str] = set()
         for proposal in kept:
+            if params.entry_window_minutes > 0:
+                refreshed = self._refresh(proposal.quote.venue, proposal.quote.market_id, proposal.quote.side)
+                if refreshed is None:
+                    decisions.append(Decision("skipped", "book", proposal.quote.title,
+                        proposal.quote.venue, proposal.quote.outcome, "Could not refresh the quote after model review.", key=proposal.key))
+                    continue
+                proposal.quote = refreshed
             depth = self.check_depth(proposal.quote, proposal.shares, "buy")
             if not depth.ok:
                 decisions.append(Decision(
@@ -366,6 +396,7 @@ class Engine:
             row = asdict(quote)
             row["key"] = quote.key
             row["end_time"] = quote.end_time.isoformat() if quote.end_time else None
+            row["expected_resolution_time"] = quote.expected_resolution_time.isoformat() if quote.expected_resolution_time else None
             observations.append(row)
         self.store.save_scan(cycle, {
             **info, "params": params.to_json(), "params_after": updated.to_json(),
@@ -580,6 +611,8 @@ class Engine:
         unrealized = sum(item.mark_value - item.cost_basis for item in positions)
         param_rows = []
         for key, (label, help_text) in PARAM_COPY.items():
+            if params.entry_window_minutes > 0 and key in {"min_hours_to_expiry", "max_days_to_expiry"}:
+                continue
             lo, hi = RAILS[key]
             param_rows.append({
                 "key": key,
@@ -590,6 +623,11 @@ class Engine:
                 "max": hi,
                 "adjustable": key != "scan_interval_seconds",
             })
+        if params.entry_window_minutes > 0:
+            param_rows.insert(0, {"key": "entry_window_minutes", "label": "Outcome within",
+                "help": "Minutes until the venue expects the outcome; payout may come later.",
+                "value": params.entry_window_minutes, "min": params.entry_window_minutes,
+                "max": params.entry_window_minutes, "adjustable": False})
         retros = self.store.retros(6)
         research = self.store.research_summary()
         research["calibration"] = [
@@ -597,6 +635,9 @@ class Engine:
             for bucket, (wins, count) in sorted(self.store.calibration().items())
         ]
         return {
+            "daily": current_day(self.store, equity),
+            "last_24h": rolling_day(self.store, equity),
+            "benchmark": benchmark_snapshot(self.store, equity),
             "name": "Consistently Not Stupid",
             "mode": "paper",
             "live": "unavailable",

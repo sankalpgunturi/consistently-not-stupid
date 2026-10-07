@@ -13,7 +13,6 @@
 <body>
   <header class="top">
     <div class="brand">
-      <p class="eyebrow">Kalshi · Paper trading <span id="paper-day"></span></p>
       <h1>Consistently Not Stupid</h1>
     </div>
     <div class="top-meta">
@@ -31,6 +30,7 @@
 
     <section class="card balance-chart">
       <div class="card-head"><h2>Balance over time</h2><p class="muted" id="starting-balance">Started with $1,000</p></div>
+      <p class="muted" id="benchmark" aria-live="polite">S&amp;P 500 comparison loading…</p>
       <canvas id="equity" width="1100" height="190" aria-label="Paper account balance over time"></canvas>
     </section>
 
@@ -98,15 +98,15 @@
       <details class="inner-disclosure"><summary>Our strategy</summary>
         <ul class="prose">
           <li>High confidence: target outcomes above 90%.</li>
-          <li>Short horizon: aim to enter near resolution.</li>
+          <li>Short horizon: enter within 10 minutes of the expected outcome.</li>
           <li>Small stakes: spread roughly $1 bets across independent outcomes.</li>
-          <li>Protect capital: count fees before considering profit.</li>
+          <li>Daily target: finish each 24 hours at or above its starting value, after fees.</li>
         </ul>
-        <p class="muted">The thesis we are testing. Zero loss is the goal, not a guarantee. Timing rules are still under review; the runner currently requires at least two hours to close.</p>
+        <p class="muted">One $1,000 contribution. Reinvest proceeds. Individual losses are allowed; daily profit and long-term capital preservation are targets, not guarantees.</p>
       </details>
     </details>
   </main>
-  <footer class="foot"><p>Simulated funds · Runs every 10 minutes</p></footer>
+  <footer class="foot"><p>Simulated funds · Scans about every minute</p></footer>
   <script src="/static/app.js"></script>
 </body>
 </html>

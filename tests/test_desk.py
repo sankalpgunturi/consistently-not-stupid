@@ -421,7 +421,7 @@ def test_parsers_keep_a_real_favorite_and_drop_a_stub():
 
 def test_engine_paper_cycle_buys_when_the_record_clears(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
@@ -437,7 +437,7 @@ def test_engine_paper_cycle_buys_when_the_record_clears(tmp_path):
 
 def test_a_pause_during_the_scan_blocks_the_fill(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
@@ -457,7 +457,7 @@ def test_a_pause_during_the_scan_blocks_the_fill(tmp_path):
 
 def test_a_block_during_the_scan_blocks_the_fill(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
@@ -475,7 +475,7 @@ def test_a_block_during_the_scan_blocks_the_fill(tmp_path):
 
 
 def test_a_stop_can_fire_before_the_next_scan(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
     PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", engine.store.cycle())
@@ -492,7 +492,7 @@ def test_a_stop_can_fire_before_the_next_scan(tmp_path):
 
 def test_drawdown_pauses_new_buys(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000, max_drawdown=0.05)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000, max_drawdown=0.05)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
@@ -508,7 +508,7 @@ def test_drawdown_pauses_new_buys(tmp_path):
 
 
 def test_dashboard_and_health(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.refresher = lambda *_args: None
     app = create_app(engine, start_loop=False)
@@ -540,7 +540,7 @@ def test_dashboard_and_health(tmp_path):
 
 
 def test_websocket_sends_the_paper_snapshot(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     app = create_app(engine, start_loop=False)
     with TestClient(app, base_url="http://127.0.0.1") as client:
@@ -554,7 +554,7 @@ def test_websocket_sends_the_paper_snapshot(tmp_path):
 
 
 def test_a_foreign_websocket_origin_is_refused(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     app = create_app(engine, start_loop=False)
     with TestClient(app, base_url="http://127.0.0.1") as client:
@@ -587,7 +587,7 @@ def test_displayed_size_has_to_cover_the_clip():
 
 def test_thin_book_does_not_fill(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
@@ -636,7 +636,7 @@ def test_decisions_veto_cannot_add_a_clip_and_a_bad_body_drops_nothing():
 
 def test_a_veto_removes_the_buy(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
@@ -649,7 +649,7 @@ def test_a_veto_removes_the_buy(tmp_path):
 
 
 def test_pause_block_and_tighten_stick(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.refresher = lambda *_args: None
     app = create_app(engine, start_loop=False)
@@ -677,7 +677,7 @@ def test_pause_block_and_tighten_stick(tmp_path):
 
 
 def test_manual_close_needs_size(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
     PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", 1)
@@ -737,7 +737,7 @@ def test_refresh_keeps_a_book_pinned_at_the_rail(tmp_path):
     assert yes_side.bid == 1.0 and yes_side.ask == 1.0
     assert yes_side.settled is True and yes_side.winner == "yes"
     assert no_side.bid == 0.0 and no_side.ask == 0.0 and no_side.settled is True
-    engine = Engine(Settings(data_dir=str(tmp_path), bankroll=1000), fetcher=lambda _settings: ([], []))
+    engine = Engine(Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000), fetcher=lambda _settings: ([], []))
     PaperBroker(engine.store).buy(make_quote(market_id="KXTEST-1"), 1, "learned", "test", 1)
     engine.refresher = lambda _venue, _market_id, side: quote_on_side(bare, side)
     engine.mark_open()
@@ -750,7 +750,7 @@ def test_refresh_keeps_a_book_pinned_at_the_rail(tmp_path):
 def test_refresh_does_not_borrow_the_other_side(tmp_path, monkeypatch):
     yes = make_quote(bid=0.99, ask=1.0)
     monkeypatch.setattr("cst.engine.fetch_kalshi_ticker", lambda *_args, **_kwargs: [yes])
-    engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _settings: ([], []))
+    engine = Engine(Settings(entry_window_minutes=0, data_dir=str(tmp_path)), fetcher=lambda _settings: ([], []))
     assert quote_on_side([yes], "no") is None
     assert engine._refresh("kalshi", "m1", "no") is None
     assert engine._refresh("kalshi", "m1", "yes").bid == 0.99
@@ -758,7 +758,7 @@ def test_refresh_does_not_borrow_the_other_side(tmp_path, monkeypatch):
 
 
 def test_a_pinned_winner_is_marked_and_a_zero_bid_stops(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
     PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", 1)
@@ -779,7 +779,7 @@ def test_a_failed_scan_is_visible(tmp_path):
     def boom(_settings):
         raise RuntimeError("venue down")
 
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=boom)
     state = engine.run_cycle()
     assert state["status"] == "error"
@@ -800,7 +800,7 @@ def test_a_failed_scan_is_visible(tmp_path):
 
 
 def test_a_tighten_during_the_scan_is_not_reverted(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     for _ in range(10):
         engine.store.add_settlement(Settlement("0.93–0.96", False, 0.94, 0.02, -4))
@@ -834,7 +834,7 @@ def test_a_missing_bid_is_not_a_quoted_zero_and_does_not_sell(tmp_path):
     assert all(item.side != "yes" for item in parsed)
     assert parsed
     assert all(item.bid > 0 for item in parsed)
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
     PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", 1)
@@ -847,7 +847,7 @@ def test_a_missing_bid_is_not_a_quoted_zero_and_does_not_sell(tmp_path):
 
 def test_a_tighten_during_the_scan_drops_the_fill(tmp_path):
     quote = make_quote(bid=0.90, ask=0.91)
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
@@ -875,7 +875,7 @@ def test_model_suggestions_wait_for_a_new_settlement(tmp_path):
         def review(self, _params, _proposals, _counts, _settlements):
             return {}, {"min_probability": 0.99}, "The model wants a higher bar."
 
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []), reviewer=_Suggest())
     for _ in range(3):
         engine.run_cycle()
@@ -1043,7 +1043,7 @@ def test_an_upgraded_sample_keeps_its_horizon_and_a_bare_aggregate_does_not(tmp_
     seeded.conn.close()
     quote = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=20))
     engine = Engine(
-        Settings(data_dir=str(engine_path), min_stable_scans=1, bankroll=1000),
+        Settings(entry_window_minutes=0, data_dir=str(engine_path), min_stable_scans=1, bankroll=1000),
         fetcher=lambda _settings: ([quote], []),
         history=lambda *_args: (None, "Kalshi settled record: down"),
     )
@@ -1067,7 +1067,7 @@ def test_reset_keeps_the_venue_record(tmp_path):
 
 
 def test_a_polymarket_position_is_closed_at_cost_on_open(tmp_path):
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     engine.store.conn.execute("UPDATE meta SET value = ? WHERE key = 'cash'", (json.dumps(900.0),))
     engine.store.conn.execute(
@@ -1098,7 +1098,7 @@ def test_a_polymarket_position_is_closed_at_cost_on_open(tmp_path):
 
 def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
     soon = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=2.5))
-    settings = Settings(data_dir=str(tmp_path / "soon"), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path / "soon"), min_stable_scans=1, bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([soon], []))
     engine.store.set_venue_record({price_bucket(soon.ask): (100, 100)})
     engine.depth = _cover
@@ -1118,7 +1118,7 @@ def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
     assert any(row["reason_code"] == "tightened" for row in state["tape"])
     assert engine.store.params().min_hours_to_expiry == 3
 
-    small = Settings(data_dir=str(tmp_path / "small"), min_stable_scans=1, bankroll=125)
+    small = Settings(entry_window_minutes=0, data_dir=str(tmp_path / "small"), min_stable_scans=1, bankroll=125)
     clip = make_quote()
     sized = Engine(small, fetcher=lambda _settings: ([clip], []))
     sized.store.set_venue_record({price_bucket(clip.ask): (100, 100)})
@@ -1138,7 +1138,7 @@ def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
     assert capped["book"]["cash"] == 125
     assert any(row["reason_code"] == "tightened" for row in capped["tape"])
 
-    kept = Settings(data_dir=str(tmp_path / "kept"), min_stable_scans=1, bankroll=1000)
+    kept = Settings(entry_window_minutes=0, data_dir=str(tmp_path / "kept"), min_stable_scans=1, bankroll=1000)
     quote = make_quote(end_time=datetime.now(timezone.utc) + timedelta(hours=20))
     close = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
     desk = Engine(kept, fetcher=lambda _settings: ([quote], []))
@@ -1175,7 +1175,7 @@ def test_a_mid_scan_tighten_rechecks_horizon_size_and_the_record(tmp_path):
 
 def test_engine_buys_from_the_venue_record_and_keeps_it_when_the_read_fails(tmp_path):
     quote = make_quote()
-    settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
     bucket = price_bucket(0.94)
 
     def history(_settings, _skip, hours, _resume=None):
@@ -1204,7 +1204,7 @@ def test_a_losing_window_tightens_once_until_the_next_settlement(tmp_path):
     params = StrategyParams()
     assert heuristic_updates(params, losses, seen=len(losses)) == {}
     assert heuristic_updates(params, losses, seen=0)["min_probability"] == 0.91
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     for row in losses:
         engine.store.add_settlement(row)
@@ -1236,7 +1236,7 @@ def test_origin_follows_the_bound_host(tmp_path):
     assert not host_allowed("attacker.example", "127.0.0.1")
     assert not host_allowed("10.1.2.3:8000", "0.0.0.0")
     assert host_allowed("127.0.0.1:8000", "0.0.0.0")
-    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    settings = Settings(entry_window_minutes=0, data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     app = create_app(engine, start_loop=False, bind_host="10.1.2.3")
     with TestClient(app, base_url="http://127.0.0.1") as client:

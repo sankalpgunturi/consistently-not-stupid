@@ -107,12 +107,24 @@ def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[st
     if quote.volume < 10 and quote.liquidity < 10:
         return "liquidity", "Almost no contracts have traded, so the quote is not a crowd."
     hours = _hours_left(quote, now)
-    if hours is None:
-        return "horizon", "There is no close time, so the cash could sit there with no end."
-    if hours < params.min_hours_to_expiry:
-        return "horizon", "It closes too soon. The desk wants time to see the quote hold still."
-    if hours > params.max_days_to_expiry * 24:
-        return "horizon", "It is too far away. A high price today is a different bet in a few months."
+    if params.entry_window_minutes > 0:
+        if hours is None or hours <= 0:
+            return "horizon", "Trading has closed, or its close time is unknown."
+        expected = quote.expected_resolution_time
+        if expected is None:
+            return "horizon", "The expected outcome time is unknown; close time alone is not enough."
+        if expected.tzinfo is None:
+            expected = expected.replace(tzinfo=timezone.utc)
+        minutes = (expected - now).total_seconds() / 60
+        if minutes <= 0 or minutes > params.entry_window_minutes:
+            return "horizon", f"The expected outcome must be within the next {params.entry_window_minutes:g} minutes."
+    else:
+        if hours is None:
+            return "horizon", "There is no close time, so the cash could sit there with no end."
+        if hours < params.min_hours_to_expiry:
+            return "horizon", "It closes too soon. The desk wants time to see the quote hold still."
+        if hours > params.max_days_to_expiry * 24:
+            return "horizon", "It is too far away. A high price today is a different bet in a few months."
     ok, _per, _profit, detail = _fee_ok(quote, params)
     if not ok:
         return "fee", detail

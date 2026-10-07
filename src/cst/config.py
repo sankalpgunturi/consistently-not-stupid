@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     kalshi_pages: int = 8
     kalshi_page_size: int = 200
 
+    entry_window_minutes: float = 10
     min_probability: float = 0.90
     min_win_profit: float = 0.01
     min_edge: float = 0.01
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
     max_category_fraction: float = 0.15
     max_drawdown: float = 0.05
     stop_gap: float = 0.08
-    scan_interval_seconds: int = 600
+    scan_interval_seconds: int = 60
     mark_interval_seconds: int = 60
     min_stable_scans: int = 2
     correlation_threshold: float = 0.48
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
 
     def seed_params(self) -> StrategyParams:
         return StrategyParams(
+            entry_window_minutes=self.entry_window_minutes,
             min_probability=self.min_probability,
             min_win_profit=self.min_win_profit,
             min_edge=self.min_edge,

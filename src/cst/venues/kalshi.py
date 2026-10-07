@@ -155,6 +155,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
             volume=volume,
             liquidity=liquidity,
             end_time=end,
+            expected_resolution_time=_dt(market.get("expected_expiration_time")),
             category=category,
             fee_model="kalshi",
             fee_rate=fee_rate,

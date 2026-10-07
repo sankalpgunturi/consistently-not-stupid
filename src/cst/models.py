@@ -44,6 +44,7 @@ class Quote:
     settled: bool = False
     winner: str | None = None
     fee_verified: bool = True
+    expected_resolution_time: datetime | None = None
 
     @property
     def key(self) -> str:
@@ -60,6 +61,8 @@ class Quote:
 
 @dataclass(slots=True)
 class StrategyParams:
+    # Zero preserves replay compatibility with the former long-horizon strategy.
+    entry_window_minutes: float = 0
     min_probability: float = 0.90
     min_win_profit: float = 0.01
     min_edge: float = 0.01

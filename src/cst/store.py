@@ -90,12 +90,20 @@ class Store:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TEXT, payload TEXT
             );
+            CREATE TABLE IF NOT EXISTS daily_reviews (day INTEGER PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS scans (
                 cycle INTEGER PRIMARY KEY, ts TEXT NOT NULL, payload TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS observations (
                 cycle INTEGER NOT NULL, quote_key TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY (cycle, quote_key)
+            );
+            CREATE TABLE IF NOT EXISTS near_observations (
+                event_id TEXT PRIMARY KEY, ticker TEXT UNIQUE NOT NULL,
+                side TEXT NOT NULL, observed_at TEXT NOT NULL,
+                expected_at TEXT NOT NULL, minutes_left REAL NOT NULL,
+                price REAL NOT NULL, fee REAL NOT NULL, bucket TEXT NOT NULL,
+                result TEXT, resolved_at TEXT, checked_at TEXT, payload TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS stability (
                 key TEXT PRIMARY KEY,
@@ -764,7 +772,15 @@ class Store:
         rows. An upgraded aggregate with no horizon is not that fallback.
         """
         with self.lock:
-            hours = float(StrategyParams.from_json(self._get("params") or {}).min_hours_to_expiry)
+            params = StrategyParams.from_json(self._get("params") or {})
+            if params.entry_window_minutes > 0:
+                rows = self.conn.execute(
+                    "SELECT bucket, SUM(CASE WHEN side = result THEN 1 ELSE 0 END), COUNT(*) "
+                    "FROM near_observations WHERE result IN ('yes', 'no') AND minutes_left <= ? GROUP BY bucket",
+                    (params.entry_window_minutes,),
+                ).fetchall()
+                return {str(row[0]): (int(row[1]), int(row[2])) for row in rows}
+            hours = float(params.min_hours_to_expiry)
             self._score_covered(hours)
             self._commit()
             found: dict[str, list[int]] = {}
@@ -806,7 +822,8 @@ class Store:
             scans = self.conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
             observations = self.conn.execute("SELECT COUNT(*), COUNT(DISTINCT quote_key) FROM observations").fetchone()
             rows = self.conn.execute("SELECT ts, payload FROM scans ORDER BY cycle DESC LIMIT 12").fetchall()
-        return {"scans_recorded": scans, "observations": observations[0], "distinct_contract_sides": observations[1],
+            near = self.conn.execute("SELECT COUNT(*), SUM(CASE WHEN result IN ('yes','no') THEN 1 ELSE 0 END), SUM(CASE WHEN result IN ('yes','no') AND side != result THEN 1 ELSE 0 END) FROM near_observations").fetchone()
+        return {"near_resolution": {"observed_events": near[0], "resolved_events": near[1] or 0, "losing_outcomes": near[2] or 0}, "scans_recorded": scans, "observations": observations[0], "distinct_contract_sides": observations[1],
                 "recent_scans": [dict(json.loads(row["payload"]), ts=row["ts"]) for row in rows]}
 
     def retros(self, limit: int = 8) -> list[dict]:
@@ -908,7 +925,7 @@ class Store:
     def reset(self, params: StrategyParams) -> None:
         """Clear this paper book. The venue trade record is kept."""
         with self.lock:
-            for table in ("positions", "trades", "decisions", "equity", "retrospectives", "scans", "observations", "stability", "settlements", "audit", "meta"):
+            for table in ("positions", "trades", "decisions", "equity", "retrospectives", "daily_reviews", "scans", "observations", "stability", "settlements", "audit", "meta"):
                 self.conn.execute(f"DELETE FROM {table}")
             self._commit()
         self._seed(params)

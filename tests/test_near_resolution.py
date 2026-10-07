@@ -1,0 +1,105 @@
+from datetime import timedelta, datetime, timezone
+
+import pytest
+
+from cst.config import Settings
+from cst.models import StrategyParams
+from cst.near_resolution import observe_and_resolve
+from cst.store import Store
+from cst.strategy import evaluate, tightened_out
+from tests.conftest import NOW, make_quote, make_book, make_params
+
+
+def test_new_books_target_ten_minutes():
+    params = Settings().seed_params()
+    assert params.entry_window_minutes == 10
+    assert params.scan_interval_seconds == 60
+
+
+@pytest.mark.parametrize('minutes,close_minutes,accepted', [(10,10,True),(5,60,True),(10.01,60,False),(0,60,False),(-1,60,False),(5,0,False),(None,5,False)])
+def test_expected_outcome_and_open_trading_both_required(minutes,close_minutes,accepted):
+    q = make_quote(end_time=NOW+timedelta(minutes=close_minutes), expected_resolution_time=None if minutes is None else NOW+timedelta(minutes=minutes))
+    p = make_params(entry_window_minutes=10)
+    b = make_book(streaks={q.key:2}, calibration={'0.93–0.96': (100,100)})
+    result = evaluate([q],p,b,now=NOW)
+    assert bool(result.proposals) == accepted
+    if not accepted:
+        assert result.decisions[0].reason_code == 'horizon'
+    else:
+        assert tightened_out(q,p,b,now=NOW+timedelta(minutes=11)) is not None
+
+
+def test_prospective_evidence_keeps_first_event_quote_and_losses(tmp_path):
+    p=StrategyParams(entry_window_minutes=10)
+    store=Store(tmp_path/'book.sqlite',p,1000)
+    store.set_venue_record({'0.93–0.96':(100,100)})
+    assert store.calibration() == {}  # Legacy evidence cannot admit a new-regime buy.
+    q=make_quote(expected_resolution_time=NOW+timedelta(minutes=5))
+    twin=make_quote(market_id='m2',expected_resolution_time=NOW+timedelta(minutes=5))
+    settings=Settings()
+    observe_and_resolve(store,settings,[q,twin],p,NOW,resolve=False)
+    observe_and_resolve(store,settings,[q],p,NOW+timedelta(minutes=1),resolve=False)
+    assert store.conn.execute('SELECT COUNT(*) FROM near_observations').fetchone()[0] == 1
+    class Http:
+        def get_json(self,url,params):
+            return {'markets':[{'ticker':'m1','result':'no'}]}
+    observe_and_resolve(store,settings,[],p,NOW+timedelta(minutes=6),http=Http())
+    assert store.calibration() == {'0.93–0.96':(0,1)}
+    assert store.cash() == 1000
+    assert store.research_summary()['near_resolution']['losing_outcomes'] == 1
+    row=store.conn.execute('SELECT * FROM near_observations').fetchone()
+    assert row['minutes_left'] == 5
+    assert row['price'] == .94
+
+
+def test_unknown_or_failed_outcomes_do_not_become_wins(tmp_path):
+    p=StrategyParams(entry_window_minutes=10)
+    store=Store(tmp_path/'book.sqlite',p,1000)
+    q=make_quote(expected_resolution_time=NOW+timedelta(minutes=5))
+    class Http:
+        def get_json(self,*args,**kwargs):
+            return {'markets':[{'ticker':'m1','result':''}]}
+    observe_and_resolve(store,Settings(),[q],p,NOW,http=Http())
+    assert store.calibration() == {}
+    row=store.conn.execute('SELECT * FROM near_observations').fetchone()
+    assert row['resolved_at'] is None
+    assert row['checked_at'] is not None
+
+
+def test_near_engine_records_without_crediting_research_or_using_old_history(tmp_path):
+    from cst.engine import Engine
+    now=datetime.now(timezone.utc)
+    q=make_quote(expected_resolution_time=now+timedelta(minutes=5),end_time=now+timedelta(minutes=6))
+    engine=Engine(Settings(data_dir=str(tmp_path), entry_window_minutes=10),fetcher=lambda _:([q],[]))
+    engine.store.set_venue_record({'0.93–0.96':(100,100)})
+    engine.decider=lambda _:{}
+    state=engine.run_cycle()
+    assert state['errors'] == []
+    assert state['counts']['bought'] == 0
+    assert state['book']['cash'] == 1000
+    assert state['research']['near_resolution']['observed_events'] == 1
+    assert state['research']['calibration'] == []
+    assert state['research']['recent_scans'][0]['params']['entry_window_minutes'] == 10
+
+
+def test_near_engine_refreshes_quote_after_model_review(tmp_path):
+    from cst.engine import Engine
+    from cst.depth import DepthResult
+    now=datetime.now(timezone.utc)
+    q=make_quote(expected_resolution_time=now+timedelta(minutes=5),end_time=now+timedelta(minutes=6))
+    p=StrategyParams(entry_window_minutes=10,min_stable_scans=1)
+    store=Store(tmp_path/'book.sqlite',p,1000)
+    # Independent synthetic events for an admission-path fixture, not live evidence.
+    for i in range(100):
+        other=make_quote(market_id=f'h{i}',event_id=f'e{i}',expected_resolution_time=now+timedelta(minutes=5))
+        observe_and_resolve(store,Settings(),[other],p,now,resolve=False)
+    store.conn.execute("UPDATE near_observations SET result='yes'")
+    store.conn.commit()
+    engine=Engine(Settings(data_dir=str(tmp_path),entry_window_minutes=10),store=store,fetcher=lambda _:([q],[]))
+    engine.decider=lambda _:{}
+    engine.depth=lambda _q,shares,_action:DepthResult(True,shares,'covered')
+    engine.refresher=lambda *_:make_quote(expected_resolution_time=now-timedelta(seconds=1),end_time=now+timedelta(minutes=6))
+    state=engine.run_cycle()
+    assert state['counts']['confirmed'] == 1
+    assert state['counts']['bought'] == 0
+    assert any(row['reason_code']=='tightened' for row in state['tape'])

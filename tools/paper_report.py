@@ -51,6 +51,7 @@ def report(path: Path) -> dict:
             "recent_trades": trades[-50:],
             "latest_scans": scans,
             "latest_reviews": reviews,
+            "daily_evaluations": [json.loads(row[0]) for row in conn.execute("SELECT payload FROM daily_reviews ORDER BY day DESC LIMIT 30")] if conn.execute("SELECT 1 FROM sqlite_master WHERE name='daily_reviews'").fetchone() else [],
             "changes": [dict(row) for row in conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 30")],
         }
 

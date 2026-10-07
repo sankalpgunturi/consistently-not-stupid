@@ -22,6 +22,6 @@ Paper desk for high-probability Kalshi contracts. The aim is to be consistently 
 - Add an order POST, a signing path, or an arm control. Public Kalshi reads are the only venue calls.
 - Let a model add a buy. It may only drop one the deterministic rule already proposed.
 - Loosen a knob, or move `min_probability` below 0.90. Overrides tighten one step inside `RAILS`.
-- Buy a favorite because the quote is high. A buy needs the settled record to clear the all-in cost. That record is the latest Kalshi trade at least `min_hours_to_expiry` before close. Do not lower the bar, and do not buy extra clips, to manufacture the first sample. A final print is not a sample.
+- Buy a favorite because the quote is high. A buy needs the settled record to clear the all-in cost. For the ten-minute strategy, that record is the first structurally eligible quote observed prospectively per event, followed through resolution. Legacy pre-close trade history is kept separate. Do not lower the bar, and do not buy extra clips, to manufacture the first sample. A final print is not a sample.
 - Treat a similar title as a reason to buy. Twins inside Kalshi are skipped by the correlation check.
 - Add a mutating `/api/*` route that skips `X-CSRF-Token`. Reject a foreign `Origin` on those routes and on `/ws` before the socket is accepted.

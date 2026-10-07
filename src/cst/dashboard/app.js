@@ -47,6 +47,9 @@ function render(next) {
     paper_age_days: next.paper_age_days,
     evidence: next.evidence,
     book,
+    daily: next.daily,
+    last_24h: next.last_24h,
+    benchmark: next.benchmark,
     counts: next.counts,
     tape: next.tape,
     positions: next.positions,
@@ -61,17 +64,25 @@ function render(next) {
   if (stamp === lastStamp) return;
   lastStamp = stamp;
 
+  const totalGain = (book.equity || 0) - (book.start || 0);
+  const recent = next.last_24h || {};
+  const multiple = (value) => value == null ? "—" : `${value.toFixed(3)}×`;
+  const tone = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
   const cards = [
-    ["Portfolio value", money(book.equity), ""],
-    ["Profit / loss", money((book.equity || 0) - (book.start || 0)), book.equity > book.start ? "up" : book.equity < book.start ? "down" : ""],
-    ["Win rate", next.evidence?.hit_rate == null ? "—" : `${(next.evidence.hit_rate * 100).toFixed(1)}%`, ""],
+    ["Account value", money(book.equity), "", `${multiple(book.start ? book.equity / book.start : null)} initial capital`],
+    ["Total profit", money(totalGain), tone(totalGain), `Since ${money(book.start)} · After fees`],
+    ["Last 24 hours", money(recent.net_pnl || 0), tone(recent.net_pnl || 0),
+      `${multiple(recent.multiple)} · ${recent.partial ? "Since start" : "vs. 24 hours ago"}`],
   ];
-  $("stats").innerHTML = cards.map(([label, value, tone]) =>
-    `<div class="stat ${tone}"><span>${esc(label)}</span><strong>${esc(value)}</strong>${label === "Win rate" ? `<small>${esc(next.evidence?.resolved_count || 0)} settled</small>` : ""}</div>`
+  $("stats").innerHTML = cards.map(([label, value, color, detail]) =>
+    `<div class="stat ${color}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`
   ).join("");
-  $("paper-day").textContent = `· Day ${Math.floor(Number(next.paper_age_days || 0)) + 1}`;
   $("starting-balance").textContent = `Started with ${money(book.start)}`;
 
+  const benchmark = next.benchmark || {};
+  $("benchmark").textContent = benchmark.value == null ? "S&P 500 comparison unavailable" :
+    `S&P 500 (SPY): ${money(benchmark.value)} · ${multiple(benchmark.multiple)} · Algorithm ${money(Math.abs(benchmark.ahead_by))} ${benchmark.ahead_by >= 0 ? "ahead" : "behind"} · Close ${new Date(benchmark.as_of).toLocaleDateString()}${benchmark.error ? " · Update unavailable" : ""}`;
+  $("benchmark").title = benchmark.basis || "Adjusted daily closes from Yahoo Finance; no assumed annual return.";
   renderEvidence(next);
   renderResearch(next.research || {});
   const old = document.querySelector(".banner");
@@ -222,6 +233,8 @@ function renderRetro(retro, llm) {
 
 function renderResearch(research) {
   $("research-counts").textContent = `${research.scans_recorded || 0} scans archived · ${research.observations || 0} quote observations · ${research.distinct_contract_sides || 0} distinct contract sides`;
+  const near = research.near_resolution;
+  if (near) $("research-counts").textContent += ` · ${near.observed_events} near-outcome events observed, ${near.resolved_events} resolved`;
   const rows = research.calibration || [];
   $("calibration").innerHTML = rows.map(row => `<tr><td>${esc(row.bucket)}</td><td>${esc(row.samples)}</td><td>${esc(row.wins)}</td><td>${esc((row.lower_bound * 100).toFixed(1))}%</td></tr>`).join("");
   $("research-note").textContent = rows.length ? "A bucket needs at least 30 samples, and its cautious win rate must exceed the ask, fee, and required edge. Passing the sample minimum alone does not admit a trade." : "Historical samples are still being collected. The account stays in cash until the entry rule passes.";
@@ -247,6 +260,7 @@ function formatKnob(row) {
   ]);
   if (cents.has(row.key)) return `${(value * 100).toFixed(1)}¢`;
   if (percent.has(row.key)) return `${(value * 100).toFixed(1)}%`;
+  if (row.key === "entry_window_minutes") return `${value} min`;
   if (row.key === "scan_interval_seconds") return `${Math.round(value / 60)} min`;
   if (row.key === "min_hours_to_expiry") return `${value} hours`;
   if (row.key === "max_days_to_expiry") return `${value} days`;

@@ -42,3 +42,17 @@ The page can pause new buys, block a market key, close a paper clip, and tighten
 ## What this is not
 
 No matching engine, no colocation, no second strategy, no per-market model call, no model-originated buys, no live signing. Inventory caps, the pause, executable size, the fee, and a faster mark loop than the entry loop are the pieces kept from high-frequency practice. The decision clock stays at 10 minutes.
+
+## Ten-minute paper strategy (October 7 clarification)
+
+New books use `entry_window_minutes=10` and a 60-second delay between scans. A quote needs an explicit future `expected_expiration_time` within that window and a future trading close. Close time alone is not evidence that the outcome is imminent. Discovery prioritizes the next ten minutes, then the next hour and day, with an additional unfiltered open-market allocation. This is bounded discovery, not exhaustive exchange coverage.
+
+Each cycle reads quotes, records eligible research observations, resolves pending observations, evaluates the deterministic rule, and asks the models to veto proposals. Quotes and timing are checked again after model review. Calls remain sequential so no overlapping scans can duplicate a buy; actual cadence includes scan and review duration. Positions are marked between scans.
+
+`near_observations` preserves the first structurally eligible quote per event, its expected outcome time, price, fee, and eventual result. These are research observations, not fills or ledger profits. Event deduplication reduces repetition but does not establish independence across events. Calibration counts only resolved observations from the active entry window. The former two-hour samples remain in their original tables for replay and are not used to admit these bets. Until enough appropriate evidence exists, the desk stays in cash.
+
+The experimental target is nonnegative net portfolio performance per 24 hours, anchored to initial funding. Individual trades may lose. Daily equity change includes fees and unrealized changes; fees are reported separately but never subtracted twice. A negative day triggers review rather than an automatic parameter change. The original $1,000 is the only contribution; proceeds stay available for reinvestment. Neither high prices nor a short horizon guarantees a result. Venue timing estimates may change, and payment may follow the expected outcome.
+
+Daily reports use consecutive 24-hour windows from `paper_started_at`, rather than calendar midnight. `daily_reviews` stores net equity change, realized P&L, the change in unrealized P&L, fees, trading counts, scan totals, errors, and parameter-change evidence. Boundary marks and their ages are retained so downtime cannot masquerade as a precise valuation. The scan reviewer receives pending daily evaluations and saves its review; API failures leave a review pending for retry. Daily results do not reset the account.
+
+The dashboard compares the paper account with a $1,000 SPY benchmark using Yahoo Finance adjusted daily closes. SPY is an S&P 500 ETF proxy. The last completed close at or before funding is the baseline; the latest completed close is displayed with its date. Adjustments include distributions and splits, while investor brokerage fees and taxes are excluded. The cache refreshes at most every 15 minutes with a five-second HTTP timeout; a failed update retains and labels the last value. No 10% assumed return is substituted for observed data. This is a daily-close comparison, not an intraday index feed.
