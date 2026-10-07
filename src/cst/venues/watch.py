@@ -90,8 +90,8 @@ class MarketWatch:
             return [], errors + ["Discovery unavailable or stale."]
         now = datetime.now(timezone.utc)
         # Include both sides and sub-90% markets so crossing the threshold is seen.
-        wanted = {q.market_id: q for q in known if q.expected_resolution_time and
-                  0 < (q.expected_resolution_time - now).total_seconds() <= settings.entry_window_minutes * 60 + 60}
+        wanted = {q.market_id: q for q in known if q.entry_deadline and
+                  0 < (q.entry_deadline - now).total_seconds() <= settings.entry_window_minutes * 60 + 60}
         tickers = sorted(wanted)
         fresh = []
         fetched_batches = []

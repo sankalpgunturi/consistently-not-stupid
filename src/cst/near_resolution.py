@@ -18,7 +18,7 @@ def observe_and_resolve(store, settings, quotes, params, now, *, resolve=True, h
         for quote in sorted(quotes, key=lambda q: q.key):
             if not quote_in_band(quote, params) or _structural(quote, params, now):
                 continue
-            expected = quote.expected_resolution_time
+            expected = quote.entry_deadline
             if expected.tzinfo is None:
                 expected = expected.replace(tzinfo=timezone.utc)
             fee = float(fee_for(quote.fee_model, quote.min_shares, quote.ask,

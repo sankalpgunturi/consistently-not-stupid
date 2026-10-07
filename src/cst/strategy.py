@@ -148,9 +148,9 @@ def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[st
     if params.entry_window_minutes > 0:
         if hours is None or hours <= 0:
             return "horizon", "Trading has closed, or its close time is unknown."
-        expected = quote.expected_resolution_time
+        expected = quote.entry_deadline
         if expected is None:
-            return "horizon", "The expected outcome time is unknown; close time alone is not enough."
+            return "horizon", "The event cutoff or expected outcome time is unknown."
         if expected.tzinfo is None:
             expected = expected.replace(tzinfo=timezone.utc)
         minutes = (expected - now).total_seconds() / 60

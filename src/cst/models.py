@@ -48,6 +48,20 @@ class Quote:
     expected_resolution_time: datetime | None = None
 
     @property
+    def entry_deadline(self) -> datetime | None:
+        # These fixed-interval price contracts measure their outcome at close.
+        # Keep the venue's later settlement estimate separately and never infer
+        # an event cutoff from an arbitrary market's close time or title.
+        series = self.market_id.split("-", 1)[0]
+        price_intervals = {
+            "KXBTC15M", "KXETH15M", "KXSOL15M", "KXXRP15M", "KXDOGE15M",
+            "KXBNB15M", "KXNEAR15M", "KXHYPE15M", "KXZEC15M",
+            "KXEURUSD15M", "KXGBPUSD15M", "KXUSDJPY15M",
+            "KXPLATINUM15M", "KXPALLADIUM15M",
+        }
+        return self.end_time if series in price_intervals else self.expected_resolution_time
+
+    @property
     def key(self) -> str:
         return f"{self.venue}:{self.market_id}:{self.side}"
 

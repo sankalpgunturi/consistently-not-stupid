@@ -286,7 +286,7 @@ class Engine:
                 "positions": [item.to_json() for item in book.positions],
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
-                "strategy_thesis": f"{params.min_probability:.0%}+ favorites, outcome expected within {params.entry_window_minutes:g} minutes, small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
+                "strategy_thesis": f"{params.min_probability:.0%}+ favorites, event cutoff within {params.entry_window_minutes:g} minutes for fixed-interval price contracts (estimated outcome for other markets), small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
@@ -506,6 +506,7 @@ class Engine:
             row["key"] = quote.key
             row["end_time"] = quote.end_time.isoformat() if quote.end_time else None
             row["expected_resolution_time"] = quote.expected_resolution_time.isoformat() if quote.expected_resolution_time else None
+            row["entry_deadline"] = quote.entry_deadline.isoformat() if quote.entry_deadline else None
             observations.append(row)
         self.store.save_scan(cycle, {
             **info, "params": params.to_json(), "params_after": updated.to_json(),

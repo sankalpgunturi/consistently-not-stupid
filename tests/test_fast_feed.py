@@ -113,3 +113,17 @@ def test_running_watch_adopts_expanded_and_tightened_outcome_windows():
         watch.close()
         watch.thread.join(timeout=2)
         watch.poll_thread.join(timeout=2)
+
+
+def test_watch_fetches_price_bet_before_cutoff_despite_later_settlement():
+    watch=MarketWatch(lambda _: ([],[]));watch.client.close()
+    now=datetime.now(timezone.utc)
+    q=make_quote(market_id='KXETH15M-TEST-15',end_time=now+timedelta(minutes=4),expected_resolution_time=now+timedelta(minutes=9))
+    watch.quotes=[q];watch.discovered_at=time.monotonic();watch.errors=[]
+    calls=[]
+    def read(url,params):
+        calls.append(params)
+        return {'markets':[]}
+    watch.client=SimpleNamespace(get_json=read)
+    watch._poll(Settings(entry_window_minutes=5))
+    assert calls and q.market_id in calls[0]['tickers']

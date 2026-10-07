@@ -215,3 +215,33 @@ def test_final_check_explains_quote_move_without_claiming_rule_change():
     why = tightened_out(q, make_params(entry_window_minutes=10), make_book(streaks={q.key: 2}), now=NOW)
     assert 'bid 89.0%' in why and 'ask 91.0%' in why
     assert 'tightened' not in why
+
+
+@pytest.mark.parametrize('minutes,accepted', [(5,True),(4,True),(5.01,False),(0,False),(-1,False)])
+def test_price_interval_entry_uses_cutoff_not_later_settlement(minutes,accepted):
+    q=make_quote(market_id='KXETH15M-TEST-15',bid=.81,ask=.84,
+                 end_time=NOW+timedelta(minutes=minutes),expected_resolution_time=NOW+timedelta(minutes=minutes+5))
+    p=make_params(entry_window_minutes=5,min_probability=.8)
+    result=evaluate([q],p,make_book(streaks={q.key:2}),now=NOW)
+    assert bool(result.proposals) is accepted
+    assert q.expected_resolution_time==NOW+timedelta(minutes=minutes+5)
+    assert q.entry_deadline==q.end_time
+
+
+def test_generic_close_is_not_assumed_to_be_event_cutoff():
+    q=make_quote(market_id='KXOTHER-EVENT',bid=.81,ask=.84,
+                 end_time=NOW+timedelta(minutes=4),expected_resolution_time=NOW+timedelta(hours=2))
+    p=make_params(entry_window_minutes=5,min_probability=.8)
+    assert not evaluate([q],p,make_book(streaks={q.key:2}),now=NOW).proposals
+
+
+def test_price_interval_research_retains_both_deadlines(tmp_path):
+    import json
+    q=make_quote(market_id='KXETH15M-TEST-15',end_time=NOW+timedelta(minutes=4),expected_resolution_time=NOW+timedelta(minutes=9))
+    p=make_params(entry_window_minutes=5)
+    store=Store(tmp_path/'book.sqlite',p,1000)
+    observe_and_resolve(store,Settings(),[q],p,NOW,resolve=False)
+    row=store.conn.execute('SELECT minutes_left,payload FROM near_observations').fetchone()
+    assert row['minutes_left']==4
+    assert json.loads(row['payload'])['expected_resolution_time']==q.expected_resolution_time.isoformat()
+    assert store.cash()==1000 and store.trades()==[]
