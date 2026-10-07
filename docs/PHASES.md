@@ -57,8 +57,27 @@ Status: approved. The first pass returned REVISE: raising `correlation_threshold
 
 ## Phase 5 — Test
 
-Status: not started.
+Status: done. `pytest` is 32 passed. The dashboard was opened at http://127.0.0.1:8000 against a live public read.
+
+The first browser pass paused, resumed, tightened minimum probability from 90% to 91%, scanned, and blocked a single contract. Cash stayed at $1,000. There is no arm control. Two defects showed up and were fixed before the pass was accepted:
+
+- The page socket 404'd because uvicorn was installed without a WebSocket library. The dependency is now `uvicorn[standard]`, and a test reads one snapshot off `/ws`.
+- A collapsed tape row offered Block, but the click only stored one sample key. Grouped rows no longer show that button.
+
+A second pass showed Paper, Live unavailable, and Connected, then pause and resume.
+
+The live scan had favorites and none with a second price, so the Approve pair button was not on the tape. The unit tests cover an unapproved pair and an approved one.
 
 ## Phase 6 — Retrospective
 
-Status: not started.
+Status: done for this pass.
+
+The rule did what it was built to do on a real book: hundreds of quotes sat at the bar, the fee still left a cent on about a hundred of them, and zero were bought, because none had a confirmed second price. Cash stayed at the start. That is not a proof the account cannot lose. It is a proof the desk sits out when the only edge is the fee.
+
+Blind spots that were real, and what was done:
+
+- A missing WebSocket extra made the page look disconnected while the buttons still worked. Fixed and tested.
+- Block on a grouped row over-claimed. The button is only on a single contract now.
+- Raising the twin bar was classified as tightening. Review caught it. The direction is corrected and tested.
+
+Left open, on purpose, and written in `docs/GAPS.md`: human pair approval, no live wire, the 0.6 drop threshold, tighten-only with a 90% floor, no login, the standard Kalshi fee, a scan that is not the whole venue, stops that can book a small loss, and Polymarket settlement that waits for UMA. None of those are patched by pretending the book has an edge.

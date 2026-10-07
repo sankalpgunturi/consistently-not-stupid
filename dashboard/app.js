@@ -181,7 +181,9 @@ function rowActions(row) {
     bits.push(`<input class="note" data-note="${esc(row.pair_id)}" placeholder="What you checked in the rules" />`);
     bits.push(`<button type="button" class="mini" data-approve="${esc(row.pair_id)}">Approve pair</button>`);
   }
-  if (row.key) bits.push(`<button type="button" class="mini" data-block="${esc(row.key)}">Block</button>`);
+  if (row.key && !(row.group_count > 1)) {
+    bits.push(`<button type="button" class="mini" data-block="${esc(row.key)}">Block</button>`);
+  }
   if (!bits.length) return "";
   return `<div class="row-actions">${bits.join("")}</div>`;
 }

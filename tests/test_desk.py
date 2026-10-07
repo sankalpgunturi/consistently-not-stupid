@@ -377,6 +377,17 @@ def test_dashboard_and_health(tmp_path):
         assert scanned.json()["counts"]["bought"] == 0
 
 
+def test_websocket_sends_the_paper_snapshot(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), bankroll=1000)
+    engine = Engine(settings, fetcher=lambda _settings: ([], []))
+    app = create_app(engine, start_loop=False)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as socket:
+            payload = socket.receive_json()
+    assert payload["mode"] == "paper"
+    assert payload["live"] == "unavailable"
+
+
 def test_source_never_places_an_order():
     text = "\n".join(path.read_text() for path in Path("src/cst").rglob("*.py"))
     dashboard = "\n".join(path.read_text() for path in Path("dashboard").rglob("*") if path.suffix in {".html", ".js"})
