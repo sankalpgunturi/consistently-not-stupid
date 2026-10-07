@@ -23,6 +23,15 @@ from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_r
 log = logging.getLogger("cst.engine")
 
 
+def refusal_counts(decisions: list[Decision]) -> dict[str, int]:
+    """Count contracts, including grouped display rows, rather than UI rows."""
+    counts: Counter = Counter()
+    for item in decisions:
+        if item.action != "bought":
+            counts[item.reason_code] += max(1, item.group_count)
+    return dict(counts)
+
+
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
     now = datetime.now(timezone.utc).timestamp()
     window = (int(now + settings.min_hours_to_expiry * 3600), int(now + settings.max_days_to_expiry * 86400))
@@ -195,7 +204,7 @@ class Engine:
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
                 "venue_errors": errors,
-                "refusals": dict(Counter(item.reason_code for item in result.decisions)),
+                "refusals": refusal_counts(result.decisions),
             }
         drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
         if getattr(self.reviewer, "last_error", None):
@@ -328,7 +337,7 @@ class Engine:
             **info, "params": params.to_json(), "params_after": updated.to_json(),
             "equity": round(equity, 4), "cash": self.store.cash(),
             "calibration": book.calibration,
-            "refusals": dict(Counter(item.reason_code for item in decisions if item.action != "bought")),
+            "refusals": refusal_counts(decisions),
         }, observations)
         log.info("Scan %s: equity $%.2f, favorites %s, bought %s, errors %s", cycle, equity, result.counts.get("favorites", 0), bought, len(errors))
         self._next_scan = datetime.fromisoformat(info["next_scan_at"])

@@ -7,6 +7,8 @@ from cst.review import Reviewer
 from cst.broker import PaperBroker
 from cst.store import Store
 from cst.models import StrategyParams
+from cst.models import Decision
+from cst.engine import refusal_counts
 from cst.venues.kalshi import fetch_kalshi
 from tests.conftest import make_quote
 
@@ -121,3 +123,21 @@ def test_market_discovery_filters_window_and_excludes_inactive_payloads():
     assert error is None
     assert {q.market_id for q in quotes} == {"KXTEST"}
     assert calls == [{"limit": "200", "mve_filter": "exclude", "min_close_ts": "100", "max_close_ts": "200"}]
+
+
+def test_refusal_counts_include_contracts_collapsed_in_the_dashboard():
+    grouped = Decision(action="skipped", reason_code="fee", title="Event", venue="kalshi", outcome="4 contracts", detail="Fee", group_count=4)
+    assert refusal_counts([grouped, grouped]) == {"fee": 8}
+
+
+def test_read_only_report_reconciles_a_completed_trade(tmp_path):
+    from tools.paper_report import report
+    store = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
+    broker = PaperBroker(store)
+    broker.buy(make_quote(), 1, "learned", "test", 1)
+    broker.settle(store.positions()[0], True)
+    result = report(store.path)
+    assert all(result["ledger_checks"].values())
+    assert result["opened_trades"] == 1
+    assert result["settlements"] == 1
+    assert result["realized_pnl"] == pytest.approx(0.05)

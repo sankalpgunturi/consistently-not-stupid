@@ -40,6 +40,8 @@ For continuous operation on this Mac, run `.venv/bin/python tools/paper_service.
 
 The runner scans every ten minutes and marks open positions every minute. Its log is `data/logs/runner.log`; the account and research record live in `data/book.sqlite`. Scans retain settings, calibration, counts, refusals, equity, and favorite quote observations. Trade records contain fills, fees, exits, and settlements. Retrospectives retain model concerns, proposed and applied changes, and model failures. These records are local and ignored by Git.
 
+Run `.venv/bin/python tools/paper_report.py` for a read-only JSON retrospective with recent scans, reviews, trades, changes, and cash/fee/P&L reconciliation. Fills and settlements update the account in one database transaction; an interrupted write rolls back the whole operation.
+
 `cst cycle` runs one scan in the terminal. `cst simulate` prints the separate model described below. `cst reset` returns the paper book to the starting cash and starts the paper window over. `cst bench` times the admission rule on a fixed fixture and, if a key is set, one Decisions call. It does not write the book.
 
 Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or the 10-minute scan. After the first run, learned knobs live in `data/book.sqlite` and survive a restart. The environment values are the seed, and the reset command restores them.
