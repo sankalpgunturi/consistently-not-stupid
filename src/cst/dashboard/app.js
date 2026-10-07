@@ -32,13 +32,6 @@ let lastStamp = "";
 function render(next) {
   state = next;
   const book = next.book || {};
-  const labels = { scanning: "Scanning", paused: "Paused", error: "Scan failed" };
-  const status = labels[next.status] || "Paper";
-  const mode = $("mode");
-  mode.textContent = status;
-  mode.className = next.status === "error" ? "pill off" : "pill paper";
-  $("live-mode").textContent = "Live planned";
-  $("clock").textContent = new Date(next.server_time || Date.now()).toLocaleTimeString();
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
   $("pause").textContent = next.operator_pause ? "Resume buys" : "Pause buys";
   const stamp = JSON.stringify({
@@ -317,14 +310,8 @@ async function pull() {
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const socket = new WebSocket(`${proto}://${location.host}/ws`);
-  socket.onopen = () => {
-    $("live").classList.add("on");
-    $("live").querySelector("span").textContent = "Connected";
-  };
   socket.onmessage = (event) => render(JSON.parse(event.data));
   socket.onclose = () => {
-    $("live").classList.remove("on");
-    $("live").querySelector("span").textContent = "Reconnecting";
     setTimeout(connect, 1500);
   };
 }
@@ -385,7 +372,6 @@ document.body.addEventListener("click", async (event) => {
 
 setInterval(() => {
   if (!state) return;
-  $("clock").textContent = new Date().toLocaleTimeString();
   $("next").textContent = state.status === "scanning" ? "Reading the books" : `Next scan ${countdown(state.next_scan_at)}`;
 }, 1000);
 

@@ -56,23 +56,6 @@ h2 { font-size: 1.35rem; }
   padding: 28px 0 8px;
 }
 .top-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
-.pill.paper { color: var(--brass-2); border-color: rgba(224, 181, 106, 0.45); }
-.pill.off { color: var(--red); border-color: rgba(229, 137, 114, 0.45); }
-.pill, .live, .clock, .next {
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--dim);
-}
-.live { display: inline-flex; gap: 6px; align-items: center; }
-.live i {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--muted); display: block;
-}
-.live.on i { background: var(--green); box-shadow: 0 0 0 4px rgba(157, 204, 134, 0.15); }
 .btn, .text-btn {
   border: 1px solid rgba(224, 181, 106, 0.45);
   background: #3a2e1d;
@@ -292,7 +275,6 @@ td { padding: 10px 10px 10px 0; border-top: 1px solid var(--line); vertical-alig
   .top-meta { justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .live.on i { box-shadow: none; }
 }
 
 /* The daily view leads with the account; detail stays behind disclosures. */
@@ -333,4 +315,25 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
   .trades-layout { grid-template-columns: 1fr; }
   .status-line { align-items: flex-start; flex-direction: column; gap: 4px; }
   .disclosure .funnel { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Actions share one control style. */
+.btn, .btn.ghost, .text-btn, .mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cream);
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 20px;
+}
+.btn:hover, .text-btn:hover, .mini:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--brass-2);
 }

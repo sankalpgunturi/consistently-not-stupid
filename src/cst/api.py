@@ -8,6 +8,7 @@ and the snapshot socket. There is no login and no route that sends an order.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -137,7 +138,11 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
         page = DASHBOARD / "index.html"
         if not page.is_file():
             return JSONResponse({"error": "Dashboard files are not installed."}, status_code=500)
-        return FileResponse(page)
+        html = page.read_text()
+        for asset in ("app.js", "styles.css"):
+            digest = hashlib.sha256((DASHBOARD / asset).read_bytes()).hexdigest()[:16]
+            html = html.replace(f"/static/{asset}", f"/static/{asset}?v={digest}")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/health")
     def health():

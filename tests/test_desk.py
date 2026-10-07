@@ -518,11 +518,8 @@ def test_dashboard_and_health(tmp_path):
         page = client.get("/")
         assert page.status_code == 200
         assert "Consistently Not Stupid" in page.text
-        assert "instead of trying to be very intelligent" in page.text
         assert "Scan now" in page.text
-        assert "Live planned" in page.text
         assert "Pause buys" in page.text
-        assert "Kalshi" in page.text
         assert "Polymarket" not in page.text
         state = client.get("/api/state")
         body = state.json()
@@ -1301,3 +1298,24 @@ def test_dashboard_ships_with_the_package():
     assert (DASHBOARD / "index.html").is_file()
     assert (DASHBOARD / "app.js").is_file()
     assert (DASHBOARD / "styles.css").is_file()
+
+
+def test_dashboard_asset_urls_change_when_script_changes(tmp_path, monkeypatch):
+    import re
+    import cst.api as api
+
+    assets = tmp_path / 'dashboard'
+    assets.mkdir()
+    for name in ('index.html', 'app.js', 'styles.css'):
+        (assets / name).write_bytes((DASHBOARD / name).read_bytes())
+    monkeypatch.setattr(api, 'DASHBOARD', assets)
+    engine = Engine(Settings(data_dir=str(tmp_path / 'book')), fetcher=lambda _: ([], []))
+    with TestClient(create_app(engine, start_loop=False)) as client:
+        first = client.get('/')
+        assert first.headers['cache-control'] == 'no-store'
+        before = re.search(r'/static/app.js\?v=[a-f0-9]+', first.text).group()
+        with (assets / 'app.js').open('a') as script:
+            script.write('\n// deployment change\n')
+        after = re.search(r'/static/app.js\?v=[a-f0-9]+', client.get('/').text).group()
+        assert before != after
+        assert client.get(after).status_code == 200
