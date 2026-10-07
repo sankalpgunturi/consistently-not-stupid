@@ -16,7 +16,7 @@ from cst.broker import PaperBroker
 from cst.benchmark import refresh_benchmark, snapshot as benchmark_snapshot
 from cst.config import Settings
 from cst.decisions import veto_proposals
-from cst.depth import live_depth
+from cst.depth import DepthResult, live_depth
 from cst.daily import current_day, evaluate_days, save_reviews, rolling_day
 from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
@@ -547,6 +547,8 @@ class Engine:
         )
 
     def check_depth(self, quote: Quote, shares: float, action: str):
+        if not quote.tradable:
+            return DepthResult(False, 0, "The market is not open for trading.")
         if self.depth is not None:
             return self.depth(quote, shares, action)
         return live_depth(self.settings, quote, shares, action)

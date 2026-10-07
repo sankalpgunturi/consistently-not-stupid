@@ -103,3 +103,24 @@ def test_near_engine_refreshes_quote_after_model_review(tmp_path):
     assert state['counts']['confirmed'] == 1
     assert state['counts']['bought'] == 0
     assert any(row['reason_code']=='tightened' for row in state['tape'])
+
+
+@pytest.mark.parametrize('status,tradable',[('active',True),('open',True),('paused',False),('',False)])
+def test_market_status_survives_parser_and_blocks_paused_fills(tmp_path,status,tradable):
+    from cst.venues.kalshi import quotes_from_kalshi_market
+    from cst.engine import Engine
+    from cst.depth import DepthResult
+    market={'ticker':'TEST','event_ticker':'E','status':status,
+            'yes_bid_dollars':'.93','yes_ask_dollars':'.94',
+            'volume_fp':'100','open_interest_fp':'100',
+            'close_time':(NOW+timedelta(minutes=6)).isoformat(),
+            'expected_expiration_time':(NOW+timedelta(minutes=5)).isoformat()}
+    quote=quotes_from_kalshi_market(market)[0]
+    assert quote.tradable is tradable
+    p=make_params(entry_window_minutes=10)
+    b=make_book(streaks={quote.key:2},calibration={'0.93–0.96':(100,100)})
+    assert bool(evaluate([quote],p,b,now=NOW).proposals) is tradable
+    engine=Engine(Settings(data_dir=str(tmp_path)),fetcher=lambda _: ([],[]))
+    engine.depth=lambda _q,n,_action:DepthResult(True,n,'size present')
+    assert engine.check_depth(quote,1,'buy').ok is tradable
+    assert engine.check_depth(quote,1,'sell').ok is tradable

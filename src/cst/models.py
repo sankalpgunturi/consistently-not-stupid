@@ -44,6 +44,7 @@ class Quote:
     settled: bool = False
     winner: str | None = None
     fee_verified: bool = True
+    tradable: bool = True
     expected_resolution_time: datetime | None = None
 
     @property

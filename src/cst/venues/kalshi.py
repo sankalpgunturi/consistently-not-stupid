@@ -164,6 +164,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
             rules=rules,
             url=url,
             min_shares=1,
+            tradable=status in {"active", "open"} and not settled,
             settled=bool(settled and winner),
             winner=winner,
         ))

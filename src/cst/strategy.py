@@ -60,7 +60,7 @@ def price_bucket(price: float) -> str:
 
 
 def quote_in_band(quote: Quote, params: StrategyParams) -> bool:
-    if quote.settled or quote.bid <= 0 or quote.ask <= 0:
+    if not quote.tradable or quote.settled or quote.bid <= 0 or quote.ask <= 0:
         return False
     if quote.ask >= 0.999 or quote.ask < quote.bid:
         return False
