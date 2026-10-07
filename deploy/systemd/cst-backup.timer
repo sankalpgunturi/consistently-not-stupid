@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily paper ledger backup
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

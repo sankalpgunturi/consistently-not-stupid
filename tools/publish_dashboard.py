@@ -1,6 +1,7 @@
 """Send a sanitized paper snapshot to the shared Cloudflare dashboard."""
 import json
 import logging
+import os
 from pathlib import Path
 import time
 
@@ -20,11 +21,12 @@ def public_snapshot(state):
 
 def main():
     config = json.loads((ROOT / 'data/cloudflare-publisher.json').read_text())
+    local_url = os.environ.get('CST_LOCAL_URL', 'http://127.0.0.1:8000').rstrip('/')
     with httpx.Client(timeout=10) as client:
         while True:
             started = time.monotonic()
             try:
-                local = client.get('http://127.0.0.1:8000/api/state')
+                local = client.get(local_url + '/api/state')
                 local.raise_for_status()
                 result = client.post(config['url'].rstrip('/') + '/internal/snapshot',
                     headers={'Authorization': 'Bearer ' + config['token']},
@@ -36,9 +38,9 @@ def main():
                 for command in response.json().get('commands', []):
                     if command['action'] not in {'pause', 'scan', 'reset', 'block', 'knob', 'close', 'live'}:
                         continue
-                    current = client.get('http://127.0.0.1:8000/api/state')
+                    current = client.get(local_url + '/api/state')
                     current.raise_for_status()
-                    execution = client.post('http://127.0.0.1:8000/api/' + command['action'],
+                    execution = client.post(local_url + '/api/' + command['action'],
                         headers={'X-CSRF-Token': current.json()['csrf'], 'X-Command-Id': command['id']},
                         json=command['body'], timeout=60)
                     detail = None

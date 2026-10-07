@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up the paper ledger
+
+[Service]
+Type=oneshot
+User=cst
+Group=cst
+WorkingDirectory=/opt/cst
+ExecStart=/opt/cst/.venv/bin/python tools/backup_book.py
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cst/data/backups

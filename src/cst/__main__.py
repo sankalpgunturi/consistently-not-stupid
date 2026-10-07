@@ -45,6 +45,8 @@ def main() -> None:
         _bench(settings)
         return
 
+    if (settings.db_path.parent / "engine-host.json").exists():
+        raise SystemExit("This local ledger is archived. The active engine runs on chitti-vps in /opt/cst; do not start a second account.")
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     # Keep this descriptor open for the lifetime of serve/cycle/reset.
     runner_lock = settings.db_path.with_suffix(".runner.lock").open("a")

@@ -1,0 +1,24 @@
+[Unit]
+Description=Consistently Not Stupid paper engine
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=cst
+Group=cst
+WorkingDirectory=/opt/cst
+ExecStart=/opt/cst/.venv/bin/cst serve --host 127.0.0.1 --port 8765
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cst/data
+
+[Install]
+WantedBy=multi-user.target

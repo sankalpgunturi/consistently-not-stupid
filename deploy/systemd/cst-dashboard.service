@@ -1,0 +1,23 @@
+[Unit]
+Description=Consistently Not Stupid dashboard publisher
+Wants=network-online.target cst-paper.service
+After=network-online.target cst-paper.service
+StartLimitIntervalSec=0
+
+[Service]
+User=cst
+Group=cst
+WorkingDirectory=/opt/cst
+ExecStart=/opt/cst/.venv/bin/python tools/publish_dashboard.py
+Environment=PYTHONUNBUFFERED=1
+Environment=CST_LOCAL_URL=http://127.0.0.1:8765
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
