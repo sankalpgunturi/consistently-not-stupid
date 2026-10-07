@@ -26,7 +26,7 @@ def main():
         while True:
             started = time.monotonic()
             try:
-                local = client.get(local_url + '/api/state')
+                local = client.get(local_url + '/api/state?compact=true')
                 local.raise_for_status()
                 result = client.post(config['url'].rstrip('/') + '/internal/snapshot',
                     headers={'Authorization': 'Bearer ' + config['token']},
@@ -38,7 +38,7 @@ def main():
                 for command in response.json().get('commands', []):
                     if command['action'] not in {'pause', 'scan', 'reset', 'block', 'knob', 'close', 'live'}:
                         continue
-                    current = client.get(local_url + '/api/state')
+                    current = client.get(local_url + '/api/state?compact=true')
                     current.raise_for_status()
                     execution = client.post(local_url + '/api/' + command['action'],
                         headers={'X-CSRF-Token': current.json()['csrf'], 'X-Command-Id': command['id']},

@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from cst.fees import fee_for
 from cst.models import BookView, Decision, Proposal, Quote, StrategyParams
@@ -316,7 +316,6 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
     for position in book.positions:
         cat_deployed[position.category] += position.cost_basis
     held_keys = {f"{p.venue}:{p.market_id}:{p.side}" for p in book.positions}
-    accepted: list[Proposal] = []
     accepted_quotes: list[Quote] = []
 
     signal_keys = set(signals)
@@ -504,7 +503,3 @@ def drop_proposals(
             key=proposal.key,
         ))
     return kept, dropped
-
-
-def horizon_end(now: datetime, hours: float) -> datetime:
-    return now + timedelta(hours=hours)

@@ -19,7 +19,7 @@ from cst.config import Settings
 from cst.decisions import veto_proposals
 from cst.depth import DepthResult, live_depth
 from cst.daily import current_day, evaluate_days, save_reviews, rolling_day
-from cst.models import OPERATOR_CONTROLS, PARAM_COPY, RAILS, Decision, Quote, StrategyParams
+from cst.models import OPERATOR_CONTROLS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
@@ -187,7 +187,7 @@ class Engine:
         while not self._stop.is_set():
             tick_started = time.monotonic()
             try:
-                self.run_cycle()
+                self.run_cycle(include_snapshot=False)
             except Exception:
                 log.exception("scan failed")
                 info = dict(self.store.cycle_info())
@@ -211,19 +211,19 @@ class Engine:
             except Exception:
                 log.exception("mark failed")
 
-    def run_cycle(self) -> dict:
+    def run_cycle(self, *, include_snapshot: bool = True) -> dict:
         if not self._lock.acquire(blocking=False):
             return {"status": "busy"}
         try:
             try:
-                return self._run_locked()
+                return self._run_locked(include_snapshot=include_snapshot)
             except Exception:
                 log.exception("scan failed")
                 info = dict(self.store.cycle_info())
                 info["errors"] = ["The last scan failed. The book was not changed by a fill it did not record."]
                 info["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 self.store.set_status("error", info)
-                return self.snapshot()
+                return self.snapshot() if include_snapshot else info
         finally:
             self._lock.release()
 
@@ -254,7 +254,7 @@ class Engine:
                 except Exception:
                     log.exception("Position check failed while waiting for model")
 
-    def _run_locked(self) -> dict:
+    def _run_locked(self, *, include_snapshot: bool = True) -> dict:
         self.store.set_status("scanning")
         started = time.time()
         params = self.store.params()
@@ -529,7 +529,7 @@ class Engine:
         self._next_scan = datetime.fromisoformat(info["next_scan_at"])
         paused = self._paused(updated)
         self.store.set_status("paused" if paused else "watching", info)
-        return self.snapshot()
+        return self.snapshot() if include_snapshot else info
 
     def mark_open(self, locked: bool = False) -> None:
         if not locked and not self._lock.acquire(blocking=False):
@@ -770,10 +770,7 @@ class Engine:
             if not execution.filled or execution.shares <= 0:
                 return None
             if execution.shares + 1e-9 < position.shares:
-                ratio = execution.shares / position.shares
-                position.shares = execution.shares
-                position.cost_basis = round(position.cost_basis * ratio, 6)
-                position.fees = round(position.fees * ratio, 6)
+                position = replace(position, shares=execution.shares)
             if execution.price is not None:
                 bid = execution.price
         return self.broker.sell(position, bid, reason)
@@ -803,7 +800,7 @@ class Engine:
             return False
         return (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
 
-    def snapshot(self) -> dict:
+    def snapshot(self, *, compact: bool = False) -> dict:
         params = self.store.params()
         positions = self.store.positions()
         equity = self.store.mark_equity(positions)
@@ -828,16 +825,16 @@ class Engine:
         param_rows = [{"key": key, "label": label, "value": getattr(params, key),
                        "min": lo, "max": hi, "step": step, "adjustable": True}
                       for key, (label, lo, hi, step) in OPERATOR_CONTROLS.items()]
-        retros = self.store.retros(6)
-        research = self.store.research_summary()
+        retros = [] if compact else self.store.retros(6)
+        research = {} if compact else self.store.research_summary()
         research["calibration"] = [
             {"bucket": bucket, "wins": wins, "samples": count, "lower_bound": wilson_lower(wins, count)}
-            for bucket, (wins, count) in sorted(self.store.calibration().items())
+            for bucket, (wins, count) in ([] if compact else sorted(self.store.calibration().items()))
         ]
         mode = self.store.trading_mode()
         start = self.store.live_budget() if mode == "live" else float(self.settings.bankroll)
         return {
-            "daily": current_day(self.store, equity),
+            "daily": None if compact else current_day(self.store, equity),
             "last_24h": rolling_day(self.store, equity),
             "benchmark": benchmark_snapshot(self.store, equity),
             "name": "Consistently Not Stupid",
@@ -874,15 +871,15 @@ class Engine:
                 "unresolved_cost": round(sum(item.cost_basis for item in positions), 2),
                 "errors": info.get("errors") or [],
             },
-            "audit": self.store.audit(12),
+            "audit": [] if compact else self.store.audit(12),
             "counts": counts,
-            "tape": self.store.decisions(80),
+            "tape": [] if compact else self.store.decisions(80),
             "focus": info.get("focus"),
             "positions": [item.to_json() for item in positions],
             "trades": [item.to_json() for item in self.store.trades(-1)],
             "trade_reviews": self.store.trade_reviews(),
             "market_links": self.store.market_links(),
-            "equity_curve": self.store.equity_curve(),
+            "equity_curve": [] if compact else self.store.equity_curve(),
             "realized_curve": self.store.realized_curve(),
             "params": param_rows,
             "retrospective": retros[0] if retros else None,
@@ -896,7 +893,7 @@ class Engine:
             },
             "errors": info.get("errors") or [],
             "llm": {"enabled": self.reviewer.enabled, "model": self.reviewer.model if self.reviewer.enabled else ""},
-            "simulation": self.simulation(),
+            "simulation": None if compact else self.simulation(),
         }
 
     def reset(self) -> dict:

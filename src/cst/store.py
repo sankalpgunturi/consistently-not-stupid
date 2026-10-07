@@ -104,6 +104,7 @@ class Store:
                 cycle INTEGER NOT NULL, quote_key TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY (cycle, quote_key)
             );
+            CREATE INDEX IF NOT EXISTS observation_quote_cycle ON observations(quote_key, cycle DESC);
             CREATE TABLE IF NOT EXISTS near_observations (
                 event_id TEXT PRIMARY KEY, ticker TEXT UNIQUE NOT NULL,
                 side TEXT NOT NULL, observed_at TEXT NOT NULL,
@@ -1013,13 +1014,19 @@ class Store:
     def market_links(self) -> dict:
         """Use URLs archived from venue quotes, including closed positions."""
         with self.lock:
-            rows = self.conn.execute("SELECT DISTINCT quote_key, json_extract(payload, '$.url') FROM observations WHERE json_extract(payload, '$.url') IS NOT NULL").fetchall()
-            archived = self.conn.execute("SELECT ticker, json_extract(payload, '$.url') FROM near_observations WHERE ticker IN (SELECT market_id FROM trades)").fetchall()
-            keys = self.conn.execute("SELECT DISTINCT venue, market_id, side FROM trades").fetchall()
-        links = {row[0]: row[1] for row in rows if row[1]}
-        fallback = {row[0]: row[1] for row in archived if row[1]}
-        return {f'{venue}:{market}:{side}': normalize_market_url(links.get(f'{venue}:{market}:{side}', fallback.get(market)))
-                for venue, market, side in keys if links.get(f'{venue}:{market}:{side}', fallback.get(market))}
+            rows = self.conn.execute("""
+                SELECT t.venue || ':' || t.market_id || ':' || t.side AS key,
+                       COALESCE(
+                         (SELECT json_extract(o.payload, '$.url') FROM observations o
+                          WHERE o.quote_key = t.venue || ':' || t.market_id || ':' || t.side
+                            AND COALESCE(json_extract(o.payload, '$.url'), '') != ''
+                          ORDER BY o.cycle DESC LIMIT 1),
+                         (SELECT json_extract(n.payload, '$.url') FROM near_observations n
+                          WHERE n.ticker = t.market_id)
+                       ) AS url
+                FROM (SELECT DISTINCT venue, market_id, side FROM trades WHERE ledger = ?) t
+            """, (self._ledger(),)).fetchall()
+        return {row['key']: normalize_market_url(row['url']) for row in rows if row['url']}
 
     def paper_started_at(self) -> str:
         with self.lock:

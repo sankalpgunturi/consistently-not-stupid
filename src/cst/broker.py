@@ -8,6 +8,7 @@ to an exchange.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -90,11 +91,17 @@ class PaperBroker:
 
     @_atomic
     def sell(self, position: Position, bid: float, reason: str) -> Trade | None:
-        if not any(row.id == position.id for row in self.store.positions()):
+        held = next((row for row in self.store.positions() if row.id == position.id), None)
+        if held is None or position.shares <= 0 or position.shares > held.shares + 1e-9:
             return None
         # Zero is a real bid on a pinned book. A missing book never reaches here.
         if bid < 0 or bid > 1:
             return None
+        # A live IOC may fill only part of the position. Allocate its original
+        # basis and retain the unsold shares in the same atomic transaction.
+        ratio = min(1.0, position.shares / held.shares)
+        position = replace(held, shares=min(position.shares, held.shares),
+                           cost_basis=held.cost_basis * ratio, fees=held.fees * ratio)
         fee = float(fee_for(position.fee_model, position.shares, bid, position.fee_rate, position.fee_exponent))
         proceeds = max(0.0, position.shares * bid - fee)
         pnl = proceeds - position.cost_basis
@@ -102,7 +109,11 @@ class PaperBroker:
         self.store.set_cash(cash)
         self.store.add_fee(fee)
         self.store.add_realized(pnl)
-        self.store.delete_position(position.id)
+        if held.shares - position.shares > 1e-9:
+            self.store.save_position(replace(held, shares=held.shares - position.shares,
+                cost_basis=held.cost_basis - position.cost_basis, fees=held.fees - position.fees))
+        else:
+            self.store.delete_position(position.id)
         trade = Trade(
             id=str(uuid.uuid4()),
             ts=_now(),

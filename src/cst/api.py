@@ -175,8 +175,8 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
         }
 
     @app.get("/api/state")
-    def state():
-        return engine.snapshot()
+    def state(compact: bool = False):
+        return engine.snapshot(compact=compact)
 
     @app.post("/api/scan")
     def scan():
