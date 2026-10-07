@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 from cst.models import Quote
 from cst.fees import D
@@ -17,6 +18,16 @@ from cst.strategy import price_bucket
 from cst.venues.http import MarketHttp
 
 log = logging.getLogger("cst.kalshi")
+
+
+def normalize_market_url(url: str) -> str:
+    """Repair our old event-only website links without rewriting archive rows."""
+    parts = urlsplit(url)
+    path = parts.path.strip('/').split('/')
+    if parts.hostname == 'kalshi.com' and len(path) == 2 and path[0] == 'markets' and '-' in path[1]:
+        event = path[1].lower()
+        parts = parts._replace(path=f"/markets/{event.split('-')[0]}/{event}")
+    return urlunsplit(parts)
 
 # Trade lookups per scan. Each attempt counts, including a timeout.
 TRADE_LOOKUPS = 40
@@ -113,7 +124,7 @@ def quotes_from_kalshi_market(market: dict, event: dict | None = None, keep_extr
     event_id = str(market.get("event_ticker") or event.get("event_ticker") or ticker)
     volume = _num(market.get("volume_fp")) or 0.0
     liquidity = _num(market.get("open_interest_fp")) or 0.0
-    url = f"https://kalshi.com/markets/{event_id.lower()}"
+    url = f"https://kalshi.com/markets/{event_id.split('-')[0].lower()}/{event_id.lower()}"
     sides = (
         ("yes", str(market.get("yes_sub_title") or "Yes"), "yes_bid_dollars", "yes_ask_dollars", "yes_ask_size_fp", "yes_bid_size_fp"),
         ("no", str(market.get("no_sub_title") or "No"), "no_bid_dollars", "no_ask_dollars", "no_ask_size_fp", "no_bid_size_fp"),

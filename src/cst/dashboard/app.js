@@ -203,7 +203,7 @@ function renderTrades(rows, positions = []) {
     const reviewText = review?.summary || "No model review recorded for this entry.";
     const expanded = expandedTrades.has(tradeId);
     const detailId = `detail-${tradeId}`;
-    const rawUrl = position?.url || state?.market_links?.[`${row.venue}:${row.market_id}:${row.side}`];
+    const rawUrl = state?.market_links?.[`${row.venue}:${row.market_id}:${row.side}`] || position?.url;
     let marketUrl = '';
     try { const url = new URL(rawUrl); if (url.protocol === 'https:' && (url.hostname === 'kalshi.com' || url.hostname.endsWith('.kalshi.com'))) marketUrl = url.href; } catch {}
     const detailHtml = `

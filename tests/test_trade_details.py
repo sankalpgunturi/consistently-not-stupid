@@ -56,3 +56,22 @@ def test_trade_review_uses_its_buy_scan_not_latest_review(tmp_path):
     assert store.trade_reviews()[trade.id]['summary'] == 'Review for this entry'
     other = PaperBroker(store).buy(make_quote(market_id='other',event_id='other'),1,'test','Imported',5)
     assert other.id not in store.trade_reviews()
+
+
+def test_market_links_repair_archived_event_only_urls(tmp_path):
+    from cst.venues.kalshi import normalize_market_url, quotes_from_kalshi_market
+    old = 'https://kalshi.com/markets/kxgbpusd15m-26oct071330'
+    correct = 'https://kalshi.com/markets/kxgbpusd15m/kxgbpusd15m-26oct071330'
+    assert normalize_market_url(old) == correct
+    assert normalize_market_url(correct) == correct
+    canonical = 'https://kalshi.com/markets/kxgbpusd15m/15minute-gbpusd/kxgbpusd15m-26oct071330'
+    assert normalize_market_url(canonical) == canonical
+    store = Store(tmp_path/'book.sqlite', StrategyParams(),1000)
+    q = make_quote(url=old)
+    PaperBroker(store).buy(q,1,'test','Entry',1)
+    store.save_scan(1,{},[{'key':q.key,'url':old}])
+    assert store.market_links()[q.key] == correct
+    assert old in store.conn.execute('SELECT payload FROM observations').fetchone()[0]
+    quotes = quotes_from_kalshi_market({'ticker':'KXGBPUSD15M-26OCT071330-30',
+        'event_ticker':'KXGBPUSD15M-26OCT071330','yes_bid_dollars':'0.95','yes_ask_dollars':'0.96'})
+    assert quotes and all(q.url == correct for q in quotes)

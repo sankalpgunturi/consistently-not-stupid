@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 from cst.models import BookView, Decision, Position, Settlement, StrategyParams, Trade, utcnow
 from cst.strategy import price_bucket
-from cst.venues.kalshi import _covers_cutoff, _inclusive_max_ts, settled_favorite
+from cst.venues.kalshi import _covers_cutoff, _inclusive_max_ts, settled_favorite, normalize_market_url
 
 
 def _iso(dt: datetime | None = None) -> str:
@@ -930,7 +930,7 @@ class Store:
             keys = self.conn.execute("SELECT DISTINCT venue, market_id, side FROM trades").fetchall()
         links = {row[0]: row[1] for row in rows if row[1]}
         fallback = {row[0]: row[1] for row in archived if row[1]}
-        return {f'{venue}:{market}:{side}': links.get(f'{venue}:{market}:{side}', fallback.get(market))
+        return {f'{venue}:{market}:{side}': normalize_market_url(links.get(f'{venue}:{market}:{side}', fallback.get(market)))
                 for venue, market, side in keys if links.get(f'{venue}:{market}:{side}', fallback.get(market))}
 
     def paper_started_at(self) -> str:
