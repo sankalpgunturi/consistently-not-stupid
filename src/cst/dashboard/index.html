@@ -35,17 +35,9 @@
 
     <section class="layout trades-layout">
       <article class="card">
-        <div class="card-head"><h2>Open trades</h2><p class="muted" id="position-count">0 open</p></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Contract</th><th>Cost</th><th>Value</th><th>If won</th><th>If lost</th><th></th></tr></thead>
-          <tbody id="positions"></tbody>
-        </table></div>
-        <p class="empty" id="positions-empty">None</p>
-      </article>
-      <article class="card">
-        <div class="card-head"><h2>Trade history</h2></div>
+        <div class="card-head"><h2>Trades</h2></div>
         <div class="table-wrap"><table class="trade-history">
-          <thead><tr><th>Trade</th><th>Pick</th><th>Paid</th><th>Result / exit</th><th>Net P&amp;L</th><th>Opened</th><th>Closed</th></tr></thead>
+          <thead><tr><th>Trade</th><th>Pick</th><th>Paid</th><th>Status</th><th>Net P&amp;L</th><th>Opened</th><th>Closed</th></tr></thead>
           <tbody id="trades"></tbody>
         </table></div>
         <p class="empty" id="trades-empty">None</p>
@@ -81,7 +73,7 @@
       </details>
     </details>
 
-    <details class="card disclosure">
+    <details class="card disclosure settings">
       <summary>Settings</summary>
       <div class="controls-row">
         <button type="button" id="scan" class="btn">Scan now</button>

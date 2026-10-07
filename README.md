@@ -44,7 +44,7 @@ Run `.venv/bin/python tools/paper_report.py` for a read-only JSON retrospective 
 
 `cst cycle` runs one scan in the terminal. `cst simulate` prints the separate model described below. `cst reset` returns the paper book to the starting cash and starts the paper window over. `cst bench` times the admission rule on a fixed fixture and, if a key is set, one Decisions call. It does not write the book.
 
-Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or the 10-minute scan. After the first run, learned knobs live in `data/book.sqlite` and survive a restart. The environment values are the seed, and the reset command restores them.
+Copy `.env.example` to `.env` to change the starting bankroll, the 90% bar, or the one-second quote-evaluation cadence. After the first run, learned knobs live in `data/book.sqlite` and survive a restart. The environment values are the seed, and the reset command restores them.
 
 ## What the dashboard is showing
 

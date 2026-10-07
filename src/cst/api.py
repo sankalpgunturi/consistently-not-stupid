@@ -115,6 +115,9 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
 
     app = FastAPI(title="Consistently Not Stupid", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.engine = engine
+    with engine.store.lock:
+        engine.store.conn.execute("CREATE TABLE IF NOT EXISTS remote_commands (id TEXT PRIMARY KEY, received_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+        engine.store.conn.commit()
     app.state.bind_host = bind_host or engine.settings.host or "127.0.0.1"
     if DASHBOARD.exists():
         app.mount("/static", StaticFiles(directory=DASHBOARD), name="static")
@@ -131,6 +134,17 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
                 token = request.headers.get("x-csrf-token")
                 if not token or token != engine.store.csrf():
                     return JSONResponse({"error": "Missing or bad CSRF token."}, status_code=403)
+                command_id = request.headers.get("x-command-id")
+                if command_id:
+                    if len(command_id) > 128:
+                        return JSONResponse({"error": "Invalid command id."}, status_code=400)
+                    # Reserve before execution. A lost acknowledgement must never
+                    # repeat reset, manual close or a knob tightening after restart.
+                    with engine.store.lock:
+                        inserted = engine.store.conn.execute("INSERT OR IGNORE INTO remote_commands(id) VALUES (?)", (command_id,)).rowcount
+                        engine.store.conn.commit()
+                    if not inserted:
+                        return JSONResponse({"status": "already accepted"}, status_code=202)
         return await call_next(request)
 
     @app.get("/")

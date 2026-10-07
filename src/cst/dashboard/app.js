@@ -28,9 +28,14 @@ const countdown = (iso) => {
 
 let state = null;
 let lastStamp = "";
+let pendingCommand = null;
 
 function render(next) {
   state = next;
+  if (pendingCommand && next.last_command?.id === pendingCommand) {
+    pendingCommand = null;
+    if (!next.last_command.ok) window.alert(next.last_command.error || "The command failed.");
+  }
   const book = next.book || {};
   $("next").textContent = next.status === "scanning" ? "Reading the books" : `Next scan ${countdown(next.next_scan_at)}`;
   $("pause").textContent = next.operator_pause ? "Resume buys" : "Pause buys";
@@ -94,7 +99,7 @@ function render(next) {
   }
 
   const counts = next.counts || {};
-  $("run-summary").textContent = next.status === "error" ? "Scan failed" :
+  $("run-summary").textContent = next.status === "stale" ? "Updates paused" : next.status === "error" ? "Scan failed" :
     book.entries_paused ? "Paused" : next.status === "scanning" ? "Scanning" : "Running";
   const steps = [
     [counts.markets_read, "markets read"],
@@ -115,11 +120,10 @@ function render(next) {
     : "The desk is about to read Kalshi.";
 
   drawProfit(next.realized_curve || []);
-  renderPositions(next.positions || []);
   renderTape(next.tape || [], next.cycle || {});
   renderRetro(next.retrospective, next.llm || {});
   renderKnobs(next.params || []);
-  renderTrades(next.trades || []);
+  renderTrades(next.trades || [], next.positions || []);
   renderAudit(next.audit || []);
 }
 
@@ -137,25 +141,6 @@ function renderEvidence(next) {
   $("evidence").innerHTML = cells.map(([value, label]) =>
     `<div><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`
   ).join("");
-}
-
-function renderPositions(rows) {
-  $("position-count").textContent = `${rows.length} open`;
-  $("positions-empty").classList.toggle("hidden", rows.length > 0);
-  $("positions").closest(".table-wrap").classList.toggle("hidden", rows.length === 0);
-  $("positions").innerHTML = rows.map((row) => `
-    <tr>
-      <td>
-        <span class="title">${esc(row.title)}</span>
-        <span class="sub">${esc(row.side?.toUpperCase())} · ${esc(row.shares)} contracts</span>
-      </td>
-      <td class="num">${esc(money(row.cost_basis))}</td>
-      <td class="num">${esc(money(row.mark))}</td>
-      <td class="num good">${esc(money(row.profit_if_win))}</td>
-      <td class="num bad">${esc(money(-row.loss_if_wrong))}</td>
-      <td><button type="button" class="mini" data-close="${esc(row.id)}">Close</button></td>
-    </tr>
-  `).join("");
 }
 
 function renderTape(rows, cycle) {
@@ -247,7 +232,7 @@ function formatKnob(row) {
   if (cents.has(row.key)) return `${(value * 100).toFixed(1)}¢`;
   if (percent.has(row.key)) return `${(value * 100).toFixed(1)}%`;
   if (row.key === "entry_window_minutes") return `${value} min`;
-  if (row.key === "scan_interval_seconds") return `${Math.round(value / 60)} min`;
+  if (row.key === "scan_interval_seconds") return value < 60 ? `${value} sec` : `${Math.round(value / 60)} min`;
   if (row.key === "min_hours_to_expiry") return `${value} hours`;
   if (row.key === "max_days_to_expiry") return `${value} days`;
   return String(row.value);
@@ -260,7 +245,7 @@ function renderAudit(rows) {
   ).join("");
 }
 
-function renderTrades(rows) {
+function renderTrades(rows, positions = []) {
   const stories = [];
   const pending = new Map();
   for (const row of [...rows].reverse()) {
@@ -275,10 +260,18 @@ function renderTrades(rows) {
       else stories.push({entry: null, exit: row});
     }
   }
+  // Positions are authoritative, including entries older than the recent tape.
+  const openStories = positions.map(position => ({entry: {
+    venue: position.venue, market_id: position.market_id, title: position.title,
+    side: position.side, shares: position.shares, price: position.entry_price,
+    fee: position.cost_basis - position.shares * position.entry_price,
+    ts: position.opened_at,
+  }, exit: null}));
+  const visible = [...openStories, ...stories.filter(story => story.exit).reverse().slice(0, 8)];
   const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
   const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
-  $("trades-empty").classList.toggle("hidden", stories.length > 0);
-  $("trades").innerHTML = stories.reverse().slice(0, 8).map(({entry, exit}) => {
+  $("trades-empty").classList.toggle("hidden", visible.length > 0);
+  $("trades").innerHTML = visible.map(({entry, exit}) => {
     const row = entry || exit;
     const stopped = exit?.action === "sell" && exit.reason?.includes("bid fell");
     const result = !exit ? "Open" : exit.action === "settle" ? (exit.won ? "Won" : "Lost") : stopped ? "Stop-loss" : "Sold";
@@ -286,13 +279,13 @@ function renderTrades(rows) {
     const outcomeClass = !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
     const outcomeLabel = exit?.action === "sell" ? `${exit.pnl > 0 ? "Won" : exit.pnl < 0 ? "Lost" : "Flat"} · ${result}` : result;
     return `<tr class="${outcomeClass}">
-      <td class="title">${esc(row.title)}</td>
-      <td>${esc((row.side || exit?.side || "—").toUpperCase())}</td>
-      <td class="num">${esc(paid)}</td>
-      <td class="trade-result" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
-      <td class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
-      <td class="num" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
-      <td class="num" title="${esc(exit ? new Date(exit.ts).toLocaleString() : "")}">${exit ? esc(time(exit.ts)) : "—"}</td>
+      <td class="title" data-label="Trade">${esc(row.title)}</td>
+      <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
+      <td class="num" data-label="Paid">${esc(paid)}</td>
+      <td class="trade-result" data-label="Status" title="${esc(exit?.reason || "")}">${esc(outcomeLabel)}</td>
+      <td data-label="Net P&amp;L" class="num ${exit?.pnl < 0 ? "bad" : exit?.pnl > 0 ? "good" : ""}">${exit ? esc(`${exit.pnl > 0 ? "+" : exit.pnl < 0 ? "−" : ""}${cents(Math.abs(exit.pnl))}`) : "—"}</td>
+      <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
+      <td class="num" data-label="Closed" title="${esc(exit ? new Date(exit.ts).toLocaleString() : "")}">${exit ? esc(time(exit.ts)) : "—"}</td>
     </tr>`;
   }).join("");
 }
@@ -316,7 +309,6 @@ function drawProfit(points) {
   chart.innerHTML = `<title>Cumulative net profit from ${points.length} completed trades</title>
     ${ticks.map(value => `<line x1="95" x2="1065" y1="${y(value)}" y2="${y(value)}" stroke="${value === 0 ? '#948773' : '#38332b'}" stroke-dasharray="4 5"/><text x="82" y="${y(value) + 4}" text-anchor="end" fill="#afa595" font-size="13">${esc(money(value, 3))}</text>`).join("")}
     <path d="${path}" fill="none" stroke="#e0b56a" stroke-width="2.5"/>
-    <text x="95" y="225" fill="#afa595" font-size="13">Start · $0</text>
     <text x="1065" y="225" text-anchor="end" fill="#afa595" font-size="13">${points.length} completed trade${points.length === 1 ? '' : 's'}</text>
     ${points.map((point, i) => {
       const label = `${point.title} · ${point.side ? point.side.toUpperCase() : 'Pick unavailable'} · ${new Date(point.ts).toLocaleString()} · Trade ${money(point.pnl, 3)} · Total ${money(point.cumulative_pnl, 3)}`;
@@ -348,7 +340,7 @@ async function post(url, body) {
   const response = await fetch(url, options);
   let payload = null;
   try { payload = await response.json(); } catch (_err) { payload = null; }
-  if (response.status === 202) return payload;
+  if (response.status === 202) { pendingCommand = payload?.id || null; return payload; }
   if (!response.ok) {
     const message = payload?.error || "The desk refused that change.";
     window.alert(message);
@@ -384,9 +376,7 @@ document.body.addEventListener("click", async (event) => {
   if (!(target instanceof HTMLElement)) return;
   if (target.dataset.block) {
     await post("/api/block", { key: target.dataset.block });
-  } else if (target.dataset.close) {
-    if (!confirm("Close this paper clip at the current bid, if the book can fill it?")) return;
-    await post("/api/close", { id: target.dataset.close });
+
   } else if (target.dataset.tighten) {
     await post("/api/knob", { key: target.dataset.tighten });
   }
@@ -394,8 +384,24 @@ document.body.addEventListener("click", async (event) => {
 
 setInterval(() => {
   if (!state) return;
-  $("next").textContent = state.status === "scanning" ? "Reading the books" : `Next scan ${countdown(state.next_scan_at)}`;
+  if (window.CST_REMOTE) {
+    $("next").textContent = state.published_at ? `Updated ${new Date(state.published_at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}` : "";
+    if (!state.published_at || Date.now() - Date.parse(state.published_at) > 30000) $("run-summary").textContent = "Updates paused";
+  } else {
+    $("next").textContent = state.status === "scanning" ? "Reading the books" : `Next scan ${countdown(state.next_scan_at)}`;
+  }
 }, 1000);
 
 pull().catch(() => {});
-connect();
+if (window.CST_REMOTE) {
+  let polling = false;
+  setInterval(async () => {
+    if (polling || document.hidden) return;
+    polling = true;
+    try { await pull(); }
+    catch { $("run-summary").textContent = "Updates paused"; }
+    finally { polling = false; }
+  }, 5000);
+} else {
+  connect();
+}

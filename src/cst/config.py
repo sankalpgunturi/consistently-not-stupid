@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     max_category_fraction: float = 0.15
     max_drawdown: float = 0.05
     stop_gap: float = 0.08
-    scan_interval_seconds: int = 60
-    mark_interval_seconds: int = 60
+    scan_interval_seconds: int = 1
+    mark_interval_seconds: int = 1
     min_stable_scans: int = 2
     correlation_threshold: float = 0.48
     min_sample: int = 30

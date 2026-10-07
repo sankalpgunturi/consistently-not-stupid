@@ -105,6 +105,12 @@ class Engine:
         self.store = store or Store(settings.db_path, settings.seed_params(), float(settings.bankroll))
         self.broker = PaperBroker(self.store)
         self.fetcher = fetcher or default_fetch
+        self._watch = None
+        if fetcher is None and settings.entry_window_minutes > 0:
+            from cst.venues.watch import MarketWatch
+            self._watch = MarketWatch(default_fetch)
+            self.fetcher = self._watch
+        self._last_resolution_check = 0.0
         # A test that injects quotes should not also call the public settled feed.
         # Production leaves both empty and seeds the record from Kalshi.
         if history is not None:
@@ -142,6 +148,8 @@ class Engine:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._watch:
+            self._watch.close()
         self._wake.set()
         if self._thread:
             self._thread.join(timeout=2)
@@ -169,6 +177,7 @@ class Engine:
         # Restarting to load a fix must not manufacture another stable scan.
         self._wait_for_scan()
         while not self._stop.is_set():
+            tick_started = time.monotonic()
             try:
                 self.run_cycle()
             except Exception:
@@ -177,7 +186,7 @@ class Engine:
                 info["errors"] = ["The last scan failed. The book was not changed by a fill it did not record."]
                 self.store.set_status("error", info)
             params = self.store.params()
-            self._next_scan = datetime.now(timezone.utc) + timedelta(seconds=params.scan_interval_seconds)
+            self._next_scan = datetime.now(timezone.utc) + timedelta(seconds=max(0, params.scan_interval_seconds - (time.monotonic() - tick_started)))
             self.store.set_status(self.store.status() if self.store.status() != "scanning" else "watching", self.store.cycle_info() | {"next_scan_at": self._next_scan.isoformat(timespec="seconds")})
             self._wait_for_scan()
 
@@ -214,15 +223,17 @@ class Engine:
         self.store.set_status("scanning")
         started = time.time()
         params = self.store.params()
-        if self.fetcher is default_fetch:
+        if self.fetcher is default_fetch or self._watch:
             refresh_benchmark(self.store)
         fetch_settings = self.settings.model_copy(update={"entry_window_minutes": params.entry_window_minutes})
         quotes, errors = self.fetcher(fetch_settings)
         retrieved_at = datetime.now(timezone.utc)
         if params.entry_window_minutes > 0:
             from cst.near_resolution import observe_and_resolve
-            history_error = observe_and_resolve(self.store, self.settings, quotes, params, retrieved_at,
-                                               resolve=self.history is not None)
+            resolve = self.history is not None and (not self._watch or time.monotonic() - self._last_resolution_check >= 30)
+            history_error = observe_and_resolve(self.store, self.settings, quotes, params, retrieved_at, resolve=resolve)
+            if resolve:
+                self._last_resolution_check = time.monotonic()
         else:
             history_error = self._refresh_history()
         if history_error:
@@ -295,6 +306,12 @@ class Engine:
                     decisions.append(Decision("skipped", "book", proposal.quote.title,
                         proposal.quote.venue, proposal.quote.outcome, "Could not refresh the quote after model review.", key=proposal.key))
                     continue
+                # The single-market refresh has no series metadata. Preserve the
+                # verified discovery fee schedule and event classification.
+                refreshed.fee_rate = proposal.quote.fee_rate
+                refreshed.fee_verified = proposal.quote.fee_verified
+                refreshed.category = proposal.quote.category
+                refreshed.event_title = proposal.quote.event_title
                 proposal.quote = refreshed
             depth = self.check_depth(proposal.quote, proposal.shares, "buy")
             if not depth.ok:
@@ -413,6 +430,11 @@ class Engine:
             "focus": result.focus.to_json() if result.focus else None,
             "next_scan_at": (datetime.now(timezone.utc) + timedelta(seconds=updated.scan_interval_seconds)).isoformat(timespec="seconds"),
         }
+        if self._watch:
+            from cst.venues.http import BUDGET
+            info["feed"] = {"quote_interval_seconds": 1, "discovery_interval_seconds": 30,
+                            "read_requests": BUDGET.requests, "read_rate_cap": BUDGET.rate,
+                            "throttles": BUDGET.throttles, "quotes": len(quotes)}
         observations = []
         for quote in quotes:
             if max(quote.bid, quote.ask) < params.min_probability:
@@ -492,7 +514,7 @@ class Engine:
         """Review exposure immediately; rate-limit unchanged empty-book commentary."""
         signature = json.dumps({"params": params.to_json(), "calibration": book.calibration,
                                 "settlements": len(book.settlements), "errors": errors}, sort_keys=True)
-        if not isinstance(self.reviewer, Reviewer) or proposals or book.positions:
+        if not isinstance(self.reviewer, Reviewer) or proposals:
             return True, signature
         if any(row.get("review_status") == "pending" for row in days):
             return True, signature

@@ -357,3 +357,19 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 .trade-history td.title { display: table-cell; }
 .trade-history td:first-child { border-left: 1px solid rgba(243, 234, 215, 0.25); }
 .trade-history td:last-child { border-right: 1px solid rgba(243, 234, 215, 0.25); }
+
+@media (max-width: 600px) {
+  .top { padding-top: 20px; }
+  .card { padding: 16px; }
+  .stat strong { font-size: clamp(1.2rem, 5.5vw, 1.7rem); }
+  .trade-history, .trade-history tbody { display: block; width: 100%; }
+  .trade-history thead { display: none; }
+  .trade-history tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(243, 234, 215, 0.25); border-radius: 8px; }
+  .trade-history td, .trade-history td:first-child, .trade-history td:last-child { display: block; border: 0; padding: 0; min-width: 0; white-space: normal; }
+  .trade-history td::before { content: attr(data-label); display: block; color: var(--muted); font-size: .72rem; margin-bottom: 3px; font-weight: 400; }
+  .trade-history td.title { display: block; grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+  .trade-history td.title::before { display: none; }
+  .btn, .text-btn, .mini { min-height: 44px; }
+  .table-wrap { min-width: 0; }
+  .balance-chart .card-head { flex-wrap: wrap; gap: 8px; }
+}

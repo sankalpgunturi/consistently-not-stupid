@@ -13,7 +13,7 @@ from tests.conftest import NOW, make_quote, make_book, make_params
 def test_new_books_target_ten_minutes():
     params = Settings().seed_params()
     assert params.entry_window_minutes == 10
-    assert params.scan_interval_seconds == 60
+    assert params.scan_interval_seconds == 1
 
 
 @pytest.mark.parametrize('minutes,close_minutes,accepted', [(10,10,True),(5,60,True),(10.01,60,False),(0,60,False),(-1,60,False),(5,0,False),(None,5,False)])

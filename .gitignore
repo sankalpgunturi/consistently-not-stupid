@@ -10,3 +10,9 @@ data/
 dist/
 build/
 *.egg-info/
+
+cloudflare/public/
+cloudflare/.wrangler/
+node_modules/
+
+.wrangler/
