@@ -22,7 +22,7 @@ from cst.models import OPERATOR_CONTROLS, PARAM_COPY, RAILS, Decision, Quote, St
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import shares_for_budget, _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
+from cst.strategy import probability_stop_reason, shares_for_budget, _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
 from cst.fees import fee_for
 from cst.live import KalshiTrader, LiveTradingError, parse_live_amount
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
@@ -262,7 +262,7 @@ class Engine:
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
-                "exit_policy": (f"Operator stop-loss: exit at a sell bid {params.stop_loss_cents:g} cents below entry, subject to depth and execution." if params.stop_loss_cents else "Hold until the official result unless manually closed; stop-loss is off.") if params.entry_window_minutes > 0 else "Legacy stop-loss applies.",
+                "exit_policy": (f"Operator stop-loss: in the final {params.stop_loss_minutes:g} minutes before trading close (or expected outcome, if earlier), exit if our side sell bid falls below {params.exit_probability:.0%}; depth and execution required." if params.stop_loss_minutes else "Hold until the official result unless manually closed; stop-loss is off.") if params.entry_window_minutes > 0 else "Legacy stop-loss applies.",
                 "admission_policy": "For the ten-minute paper experiment, historical sample size, win rate and confidence bounds are research only, never an entry requirement. Do not reinstate this gate through vetoes or parameter changes." if params.entry_window_minutes > 0 else "Legacy evidence gate applies.",
                 "calibration_source": "Prospective first eligible quote per event in the entry window; independent from old two-hour history. Different events may still correlate." if params.entry_window_minutes > 0 else "Legacy pre-close trade history",
                 "venue_errors": errors,
@@ -508,16 +508,14 @@ class Engine:
                             self._record_settlement(position, won, trade.pnl)
                     continue
                 self.broker.mark(position, quote.bid)
-                stop_gap = params.stop_gap if params.entry_window_minutes == 0 else params.stop_loss_cents / 100
-                if stop_gap > 0 and 0 <= quote.bid <= position.entry_price - stop_gap + 1e-12:
-                    depth = self.check_depth(quote, position.shares, "sell")
-                    if not depth.ok:
-                        continue
-                    self._execute_sell(
-                        position,
-                        quote.bid,
-                        f"Stop-loss: sell bid {quote.bid:.2f} reached the {stop_gap * 100:g}¢ drop from entry {position.entry_price:.2f}.",
-                    )
+                reason = probability_stop_reason(quote, params)
+                if params.entry_window_minutes == 0:
+                    reason = (f"Stop-loss: bid {quote.bid:.2f} fell {params.stop_gap * 100:g} cents below entry."
+                              if 0 <= quote.bid <= position.entry_price - params.stop_gap else None)
+                depth = self.check_depth(quote, position.shares, "sell") if reason else None
+                self.store.record_position_quote(position.id, quote, reason, depth)
+                if reason and depth.ok:
+                    self._execute_sell(position, quote.bid, reason)
             equity = self.store.mark_equity()
             self.store.note_peak(equity)
             self.store.add_equity(equity)

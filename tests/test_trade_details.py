@@ -17,7 +17,7 @@ def test_visible_settings_are_editable_both_directions_and_persist(tmp_path):
     with TestClient(create_app(engine, start_loop=False), base_url='http://127.0.0.1') as client:
         state = client.get('/api/state').json()
         headers = {'X-CSRF-Token': state['csrf']}
-        assert [r['key'] for r in state['params']] == ['entry_window_minutes', 'min_probability', 'scan_interval_seconds', 'amount_per_bet', 'stop_loss_cents']
+        assert [r['key'] for r in state['params']] == ['entry_window_minutes', 'min_probability', 'scan_interval_seconds', 'amount_per_bet', 'stop_loss_minutes', 'exit_probability']
         for row in state['params']:
             key = row['key']
             for value in (row['max'], row['min']):
@@ -113,13 +113,32 @@ def test_amount_sizes_whole_contracts_including_fees():
     assert not evaluate([q],p,b,now=NOW).proposals
 
 
-@pytest.mark.parametrize('stop,bid,depth_ok,closed', [(0,.20,True,False),(10,.81,True,False),(10,.80,True,True),(10,.79,False,False)])
-def test_operator_stop_loss_respects_bid_threshold_and_depth(tmp_path,stop,bid,depth_ok,closed):
+@pytest.mark.parametrize('minutes,bid,depth_ok,closed', [(0,.20,True,False),(2,.61,True,False),(2,.60,True,False),(2,.59,True,True),(2,.59,False,False)])
+def test_operator_probability_stop_respects_threshold_and_depth(tmp_path,minutes,bid,depth_ok,closed):
     from cst.depth import DepthResult
-    engine = Engine(Settings(data_dir=str(tmp_path),stop_loss_cents=stop),fetcher=lambda _: ([],[]))
+    from datetime import datetime, timezone
+    engine = Engine(Settings(data_dir=str(tmp_path),stop_loss_minutes=minutes,exit_probability=.60),fetcher=lambda _: ([],[]))
     q = make_quote(bid=.89,ask=.90)
     PaperBroker(engine.store).buy(q,1,'paper_favorite','test',0)
-    engine.refresher = lambda *_: make_quote(bid=bid,ask=bid+.01)
-    engine.depth = lambda *_: DepthResult(depth_ok, 'test', 'test')
+    engine.refresher = lambda *_: make_quote(bid=bid,ask=bid+.01,end_time=datetime.now(timezone.utc)+timedelta(seconds=90))
+    engine.depth = lambda *_: DepthResult(depth_ok, 1, 'test')
     engine.mark_open()
     assert (not engine.store.positions()) is closed
+    row=engine.store.conn.execute('SELECT payload FROM position_quotes').fetchone()
+    assert row is not None
+
+
+@pytest.mark.parametrize('remaining,expected,bid,tradable,trigger', [
+    (121,400,.59,True,False),(120,400,.59,True,True),
+    (1,400,.59,True,True),(0,400,.59,True,False),
+    (90,400,.60,True,False),(90,400,.0,True,False),
+    (90,400,.59,False,False),(300,60,.59,True,True),
+])
+def test_probability_stop_uses_last_tradable_window(remaining,expected,bid,tradable,trigger):
+    from cst.strategy import probability_stop_reason
+    q=make_quote(bid=bid,side='no',tradable=tradable,end_time=NOW+timedelta(seconds=remaining),expected_resolution_time=NOW+timedelta(seconds=expected))
+    p=make_params(entry_window_minutes=5,stop_loss_minutes=2,exit_probability=.6)
+    reason=probability_stop_reason(q,p,now=NOW)
+    assert bool(reason) is trigger
+    if reason:
+        assert 'NO' in reason

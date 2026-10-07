@@ -81,6 +81,26 @@ def _hours_left(quote: Quote, now: datetime) -> float | None:
     return (end - now).total_seconds() / 3600
 
 
+def probability_stop_reason(quote: Quote, params: StrategyParams, now: datetime | None = None) -> str | None:
+    """Use our side's executable bid, only while trading is still open."""
+    now = now or datetime.now(timezone.utc)
+    if params.stop_loss_minutes <= 0 or quote.settled or not quote.tradable or quote.end_time is None:
+        return None
+    def aware(value):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    close = aware(quote.end_time)
+    if now >= close:
+        return None
+    # Settlement estimates can be later than the last opportunity to sell.
+    deadline = min(close, aware(quote.expected_resolution_time)) if quote.expected_resolution_time else close
+    remaining = (deadline - now).total_seconds() / 60
+    if remaining > params.stop_loss_minutes or not 0 < quote.bid < params.exit_probability:
+        return None
+    return (f"Stop-loss: our {quote.side.upper()} sell bid was {quote.bid:.1%}, below "
+            f"{params.exit_probability:.0%}, during the final {params.stop_loss_minutes:g} minutes "
+            f"before the exit deadline {deadline.isoformat()}.")
+
+
 def shares_for_budget(quote: Quote, params: StrategyParams) -> float:
     if params.entry_window_minutes == 0:
         return quote.min_shares

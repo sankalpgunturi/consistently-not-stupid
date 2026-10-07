@@ -66,7 +66,8 @@ class StrategyParams:
     entry_window_minutes: float = 0
     min_probability: float = 0.90
     amount_per_bet: float = 1.0
-    stop_loss_cents: int = 0
+    stop_loss_minutes: int = 0
+    exit_probability: float = 0.60
     min_win_profit: float = 0.01
     min_edge: float = 0.01
     max_spread: float = 0.03
@@ -328,5 +329,6 @@ OPERATOR_CONTROLS = {
     "min_probability": ("Entry probability", 0.80, 0.99, 0.01),
     "scan_interval_seconds": ("Scan every", 1, 60, 1),
     "amount_per_bet": ("Amount per bet", 1, 100, 1),
-    "stop_loss_cents": ("Stop loss", 0, 50, 1),
+    "stop_loss_minutes": ("Stop loss: final minutes", 0, 60, 1),
+    "exit_probability": ("Exit below", 0.01, 0.99, 0.01),
 }

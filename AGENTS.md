@@ -21,9 +21,9 @@ Paper desk for high-probability Kalshi contracts. The aim is to be consistently 
 
 - Send an order while the book is in paper mode, or approve live trading outside $1 to $5,000. Signed orders live in `src/cst/live.py` and use `CST_KALSHI_API_KEY_ID` and `CST_KALSHI_PRIVATE_KEY_PATH`.
 - Let a model add a buy. It may only drop one the deterministic rule already proposed.
-- Automatic reviews may only tighten one step inside `RAILS`. The operator may directly set the five dashboard controls: outcome window (1–60 minutes), entry probability (80–99%), scan interval (1–60 seconds), amount per bet ($1–$100 including fees), and stop loss (Off or 1–50 cents below entry). These explicit user controls supersede the former 90% floor and tighten-only UI.
+- Automatic reviews may only tighten one step inside `RAILS`. The operator may directly set the dashboard controls: outcome window (1–60 minutes), entry probability (80–99%), scan interval (1–60 seconds), amount per bet ($1–$100 including fees), and stop loss (Off or the final 1–60 minutes, with an absolute exit probability of 1–99%). These explicit user controls supersede the former 90% floor and tighten-only UI.
 - The ten-minute paper experiment admits quoted favorites without a historical-evidence gate, as explicitly requested by the user. Retain prospective observations for analysis, not admission. Legacy replay keeps its historical rule. Preserve probability, timing, fee, liquidity, stability, exposure and execution checks.
 - Treat a similar title as a reason to buy. Twins inside Kalshi are skipped by the correlation check.
 - Add a mutating `/api/*` route that skips `X-CSRF-Token`. Reject a foreign `Origin` on those routes and on `/ws` before the socket is accepted.
 
-- The short-window strategy holds to the official outcome when stop loss is Off (the default). If the operator enables it, a bid drop of the selected cents below entry triggers a depth-checked exit. Manual close remains available; legacy replay retains its stop rule.
+- The short-window strategy holds to the official outcome when stop loss is Off (the default). If the operator enables it, our side’s bid below the selected absolute probability triggers a depth-checked exit during the selected final minutes before trading close (or expected outcome if earlier). Manual close remains available; legacy replay retains its stop rule.

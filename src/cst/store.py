@@ -96,6 +96,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS scans (
                 cycle INTEGER PRIMARY KEY, ts TEXT NOT NULL, payload TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS position_quotes (
+                id INTEGER PRIMARY KEY, ts TEXT NOT NULL, position_id TEXT NOT NULL, payload TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS position_quote_lookup ON position_quotes(position_id, ts);
             CREATE TABLE IF NOT EXISTS observations (
                 cycle INTEGER NOT NULL, quote_key TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY (cycle, quote_key)
@@ -304,6 +308,17 @@ class Store:
         if row is None:
             return default
         return json.loads(row["value"])
+
+    def record_position_quote(self, position_id, quote, reason, depth):
+        payload = {"market_id": quote.market_id, "side": quote.side,
+                   "bid": quote.bid, "ask": quote.ask, "bid_size": quote.bid_size,
+                   "close": quote.end_time.isoformat() if quote.end_time else None,
+                   "tradable": quote.tradable, "stop_trigger": reason,
+                   "depth": None if depth is None else {"ok": depth.ok, "size": depth.size, "detail": depth.detail}}
+        with self.lock:
+            self.conn.execute("INSERT INTO position_quotes(ts, position_id, payload) VALUES (?, ?, ?)",
+                              (_iso(), position_id, json.dumps(payload)))
+            self._commit()
 
     def params(self) -> StrategyParams:
         with self.lock:

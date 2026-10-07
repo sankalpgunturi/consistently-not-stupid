@@ -9,4 +9,4 @@ The scan in `engine.py` reads quotes, calls `strategy.evaluate`, optionally drop
 
 Do not post an order from anywhere except `live.py`, and do not post one before the operator has approved a live amount.
 
-- The short-window strategy holds to the official outcome when stop loss is Off (the default). If the operator enables it, a bid drop of the selected cents below entry triggers a depth-checked exit. Manual close remains available; legacy replay retains its stop rule.
+- The short-window strategy holds to the official outcome when stop loss is Off (the default). If the operator enables it, our side’s bid below the selected absolute probability triggers a depth-checked exit during the selected final minutes before trading close (or expected outcome if earlier). Manual close remains available; legacy replay retains its stop rule.

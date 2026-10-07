@@ -1,0 +1,99 @@
+{
+  "day_utc": "2026-10-07",
+  "completed": 43,
+  "actual_pnl": 0.22,
+  "limitations": [
+    "Stored marks may predate their scan timestamp.",
+    "Missing observations and depth prevent verification of fills.",
+    "Uses earliest observed trigger, not a complete tick replay.",
+    "One day is insufficient to validate a strategy."
+  ],
+  "scenarios": [
+    {
+      "final_minutes": 1,
+      "exit_below": 0.6,
+      "triggers": [
+        {
+          "market": "KXNEAR15M-26OCT071345-45",
+          "side": "yes",
+          "snapshot_at": "2026-10-07T17:44:17.156987+00:00",
+          "bid": 0.004,
+          "hypothetical_pnl": -0.936,
+          "actual_pnl": -0.936,
+          "won": false
+        },
+        {
+          "market": "KXUSDJPY15M-26OCT071345-30",
+          "side": "no",
+          "snapshot_at": "2026-10-07T17:44:47.079233+00:00",
+          "bid": 0.38,
+          "hypothetical_pnl": -0.61,
+          "actual_pnl": 0.030000000000000027,
+          "won": true
+        },
+        {
+          "market": "KXDJI-26OCT0714-51175.00",
+          "side": "yes",
+          "snapshot_at": "2026-10-07T17:59:01.138743+00:00",
+          "bid": 0.5,
+          "hypothetical_pnl": -0.5,
+          "actual_pnl": 0.020000000000000018,
+          "won": true
+        }
+      ],
+      "hypothetical_total_pnl": -0.94
+    },
+    {
+      "final_minutes": 2,
+      "exit_below": 0.6,
+      "triggers": [
+        {
+          "market": "KXBNB15M-26OCT071200-00",
+          "side": "yes",
+          "snapshot_at": "2026-10-07T15:58:44.304540+00:00",
+          "bid": 0.48,
+          "hypothetical_pnl": -0.525,
+          "actual_pnl": 0.015000000000000013,
+          "won": true
+        },
+        {
+          "market": "KXDJI-26OCT0713-51200.00",
+          "side": "no",
+          "snapshot_at": "2026-10-07T16:58:21.113903+00:00",
+          "bid": 0.05,
+          "hypothetical_pnl": -0.92,
+          "actual_pnl": 0.040000000000000036,
+          "won": true
+        },
+        {
+          "market": "KXNEAR15M-26OCT071345-45",
+          "side": "yes",
+          "snapshot_at": "2026-10-07T17:43:28.106880+00:00",
+          "bid": 0.54,
+          "hypothetical_pnl": -0.416,
+          "actual_pnl": -0.936,
+          "won": false
+        },
+        {
+          "market": "KXUSDJPY15M-26OCT071345-30",
+          "side": "no",
+          "snapshot_at": "2026-10-07T17:44:47.079233+00:00",
+          "bid": 0.38,
+          "hypothetical_pnl": -0.61,
+          "actual_pnl": 0.030000000000000027,
+          "won": true
+        },
+        {
+          "market": "KXDJI-26OCT0714-51175.00",
+          "side": "yes",
+          "snapshot_at": "2026-10-07T17:58:12.605551+00:00",
+          "bid": 0.5,
+          "hypothetical_pnl": -0.5,
+          "actual_pnl": 0.020000000000000018,
+          "won": true
+        }
+      ],
+      "hypothetical_total_pnl": -1.92
+    }
+  ]
+}

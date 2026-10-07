@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     entry_window_minutes: float = 5
     min_probability: float = 0.80
     amount_per_bet: float = 1.0
-    stop_loss_cents: int = 0
+    stop_loss_minutes: int = 0
+    exit_probability: float = 0.60
     min_win_profit: float = 0.01
     min_edge: float = 0.01
     max_spread: float = 0.03
@@ -54,7 +55,8 @@ class Settings(BaseSettings):
             entry_window_minutes=self.entry_window_minutes,
             min_probability=self.min_probability,
             amount_per_bet=self.amount_per_bet,
-            stop_loss_cents=self.stop_loss_cents,
+            stop_loss_minutes=self.stop_loss_minutes,
+            exit_probability=self.exit_probability,
             min_win_profit=self.min_win_profit,
             min_edge=self.min_edge,
             max_spread=self.max_spread,

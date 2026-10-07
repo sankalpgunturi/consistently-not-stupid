@@ -179,7 +179,8 @@ function formatKnob(row) {
     "min_probability", "max_position_fraction", "max_deployed_fraction",
     "max_category_fraction", "max_drawdown", "correlation_threshold",
   ]);
-  if (row.key === "stop_loss_cents") return value === 0 ? "Off" : `${value}¢ below entry`;
+  if (row.key === "stop_loss_minutes") return value === 0 ? "Off" : `Last ${value} min`;
+  if (row.key === "exit_probability") return `${Math.round(value * 100)}%`;
   if (row.key === "amount_per_bet") return `$${value.toFixed(2)}`;
   if (cents.has(row.key)) return `${(value * 100).toFixed(1)}¢`;
   if (percent.has(row.key)) return `${(value * 100).toFixed(1)}%`;
