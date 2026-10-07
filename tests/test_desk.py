@@ -1,4 +1,3 @@
-import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -11,26 +10,24 @@ from cst.api import DASHBOARD, create_app, host_allowed, origin_allowed
 from cst.broker import PaperBroker
 from cst.config import Settings
 from cst.decisions import parse_veto
-from cst.depth import DepthResult, judge_kalshi_orderbook, judge_polymarket_book
+from cst.depth import DepthResult, judge_kalshi_orderbook
 from cst.engine import Engine, quote_on_side
-from cst.fees import kalshi_taker_fee, polymarket_taker_fee
+from cst.fees import kalshi_taker_fee
 from cst.models import Settlement, StrategyParams
 from cst.review import govern, heuristic_updates, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import evaluate, pair_id, quote_in_band, wilson_lower
+from cst.strategy import evaluate, price_bucket, quote_in_band, wilson_lower
 from cst.text import related, same_proposition
 from cst.venues.kalshi import quotes_from_kalshi_market
-from cst.venues.polymarket import quotes_from_polymarket_market
 from tests.conftest import NOW, make_book, make_params, make_quote
 
+RECORD = {price_bucket(0.94): (100, 100)}
 
-def test_polymarket_fee_matches_the_published_identity():
-    assert polymarket_taker_fee(100, 0.50, 0.07, 1) == __import__("decimal").Decimal("1.75000")
-    assert polymarket_taker_fee(100, 0.90, 0.07, 1) == __import__("decimal").Decimal("0.63000")
-    assert polymarket_taker_fee(100, 0.50, 0.05, 1) == __import__("decimal").Decimal("1.25000")
-    assert polymarket_taker_fee(100, 0.90, 0, 1) == __import__("decimal").Decimal("0")
-    assert polymarket_taker_fee(1, 0.99, 0.0001, 1) == __import__("decimal").Decimal("0")
+
+def _seed_record(store, n=100):
+    for _ in range(n):
+        store.add_settlement(Settlement("0.93–0.96", True, 0.94, 0.01, 0.04))
 
 
 def test_kalshi_fee_rounds_up_to_the_next_cent():
@@ -64,10 +61,10 @@ def test_related_clusters_twins_and_leaves_different_races_alone():
     french_a = "Will Jordan Bardella win the 2027 French presidential election?"
     french_b = "Will Éric Zemmour win the 2027 French presidential election?"
     american = "Will Donald Trump win the 2028 US presidential election?"
-    assert related(french_a, "No", "e1", "polymarket", french_b, "No", "e2", "polymarket") >= 0.48
-    assert related(french_a, "No", "e1", "polymarket", american, "Yes", "e9", "polymarket") < 0.48
+    assert related(french_a, "No", "e1", "kalshi", french_b, "No", "e2", "kalshi") >= 0.48
+    assert related(french_a, "No", "e1", "kalshi", american, "Yes", "e9", "kalshi") < 0.48
     assert related(
-        "Will Bitcoin be above $82,000 on October 7?", "Yes", "a", "polymarket",
+        "Will Bitcoin be above $82,000 on October 7?", "Yes", "a", "kalshi",
         "Will Bitcoin be above $82,000 on October 8?", "Yes", "b", "kalshi",
     ) >= 0.48
 
@@ -79,64 +76,41 @@ def test_fee_eats_a_near_certain_contract():
     assert result.decisions[0].reason_code == "fee"
 
 
-def _cross_pair():
-    cheap = make_quote()
-    rich = make_quote(
-        venue="kalshi",
-        market_id="KXBTCD-TEST",
-        event_id="KXBTCD-TEST",
-        bid=0.97,
-        ask=0.98,
-        min_shares=1,
-        fee_model="kalshi",
-        fee_rate=0.07,
-        liquidity=100,
-        volume=100,
-        ask_size=20,
-    )
-    return cheap, rich
-
-
 def _cover(_quote, shares, _action):
     return DepthResult(True, shares, "The displayed size covers the clip.")
 
 
-def test_an_unapproved_pair_is_not_a_buy_until_a_person_confirms_it():
-    cheap, rich = _cross_pair()
-    streaks = {cheap.key: 2, rich.key: 2}
-    result = evaluate([cheap, rich], make_params(), make_book(streaks=streaks), now=NOW)
-    assert result.proposals == []
-    row = next(item for item in result.decisions if item.reason_code == "equivalence")
-    assert row.pair_id == pair_id(cheap.key, rich.key)
-    approved = evaluate(
-        [cheap, rich],
+def test_a_favorite_without_a_record_stays_in_cash():
+    quote = make_quote()
+    bare = evaluate([quote], make_params(), make_book(streaks={quote.key: 2}), now=NOW)
+    assert bare.proposals == []
+    assert bare.decisions[0].reason_code == "edge"
+    bought = evaluate(
+        [quote],
         make_params(),
-        make_book(streaks=streaks, approved_pairs={row.pair_id}),
+        make_book(streaks={quote.key: 2}, calibration=RECORD),
         now=NOW,
     )
-    assert len(approved.proposals) == 1
-    assert approved.proposals[0].quote.venue == "polymarket"
-    assert approved.proposals[0].signal == "cross_venue"
-    assert approved.proposals[0].edge > 0.02
+    assert len(bought.proposals) == 1
+    assert bought.proposals[0].signal == "learned"
+    assert bought.proposals[0].quote.venue == "kalshi"
 
 
 def test_one_event_keeps_one_clip():
-    first = make_quote(market_id="a")
+    first = make_quote(
+        market_id="a",
+        event_id="e1",
+        title="Will Jordan Bardella win the 2027 French presidential election?",
+    )
     second = make_quote(
         market_id="b",
-        title="Will the price of Bitcoin be above $80,000 on October 7?",
+        event_id="e2",
+        title="Will Éric Zemmour win the 2027 French presidential election?",
     )
-    twin_a = make_quote(venue="kalshi", market_id="ka", event_id="ka", bid=0.97, ask=0.98, min_shares=1, fee_model="kalshi", liquidity=50, volume=50, ask_size=10)
-    twin_b = make_quote(
-        venue="kalshi", market_id="kb", event_id="kb",
-        title=second.title, bid=0.97, ask=0.98, min_shares=1, fee_model="kalshi", liquidity=50, volume=50, ask_size=10,
-    )
-    quotes = [first, second, twin_a, twin_b]
-    pairs = {pair_id(first.key, twin_a.key), pair_id(second.key, twin_b.key)}
     result = evaluate(
-        quotes,
+        [first, second],
         make_params(),
-        make_book(streaks={q.key: 2 for q in quotes}, approved_pairs=pairs),
+        make_book(streaks={first.key: 2, second.key: 2}, calibration=RECORD),
         now=NOW,
     )
     assert len(result.proposals) == 1
@@ -157,7 +131,7 @@ def test_unstable_quote_is_watched():
     assert result.decisions[0].action == "watching"
 
 
-def test_quote_without_a_second_price_stays_in_cash():
+def test_a_favorite_in_band_without_a_record_is_an_edge_skip():
     quote = make_quote()
     result = evaluate([quote], make_params(), make_book(streaks={quote.key: 2}), now=NOW)
     assert result.proposals == []
@@ -176,7 +150,7 @@ def test_paper_buy_and_settlement_keep_the_cash_identity(tmp_path):
     store.reset(StrategyParams())
     broker = PaperBroker(store)
     quote = make_quote()
-    trade = broker.buy(quote, quote.min_shares, "cross_venue", "test", 1)
+    trade = broker.buy(quote, quote.min_shares, "learned", "test", 1)
     assert trade is not None
     cash_after_buy = store.cash()
     assert cash_after_buy < 1000
@@ -193,7 +167,7 @@ def test_a_stop_realizes_a_small_loss_instead_of_the_whole_premium(tmp_path):
     store.reset(StrategyParams())
     broker = PaperBroker(store)
     quote = make_quote()
-    broker.buy(quote, quote.min_shares, "cross_venue", "test", 1)
+    broker.buy(quote, quote.min_shares, "learned", "test", 1)
     position = store.positions()[0]
     closed = broker.sell(position, 0.80, "stop")
     assert closed.pnl < 0
@@ -260,7 +234,7 @@ def test_model_sits_out_when_the_quote_is_fair_and_trades_a_real_gap():
     report = run_report(paths=80, markets=60)
     fair = next(item for item in report["books"] if item["strategy"] == "common" and "true chance" in item["world"])
     naive = next(item for item in report["books"] if item["strategy"] == "naive")
-    rich = next(item for item in report["books"] if item["strategy"] == "common" and "second" in item["world"])
+    rich = next(item for item in report["books"] if item["strategy"] == "common" and "settled record" in item["world"])
     assert fair["mean_trades"] == 0
     assert fair["mean_pnl"] == 0
     assert naive["mean_pnl"] < 0
@@ -270,30 +244,25 @@ def test_model_sits_out_when_the_quote_is_fair_and_trades_a_real_gap():
 
 def test_parsers_keep_a_real_favorite_and_drop_a_stub():
     market = {
-        "id": "1",
-        "question": "Will the price of Bitcoin be above $82,000 on October 7?",
-        "outcomes": json.dumps(["Yes", "No"]),
-        "outcomePrices": json.dumps(["0.94", "0.06"]),
-        "bestBid": 0.93,
-        "bestAsk": 0.94,
-        "endDate": "2026-10-08T00:00:00Z",
-        "feeSchedule": {"rate": 0.07, "exponent": 1, "takerOnly": True},
-        "feeType": "crypto_fees",
-        "liquidity": "20000",
-        "volume": "5000",
-        "orderMinSize": 5,
-        "active": True,
-        "closed": False,
-        "acceptingOrders": True,
+        "ticker": "KXBTC-1",
+        "event_ticker": "KXBTC",
+        "title": "Will the price of Bitcoin be above $82,000 on October 7?",
+        "status": "active",
+        "yes_bid_dollars": "0.9300",
+        "yes_ask_dollars": "0.9400",
+        "no_bid_dollars": "0.0600",
+        "no_ask_dollars": "0.0700",
+        "yes_ask_size_fp": "20",
+        "volume_fp": "5000",
+        "open_interest_fp": "20000",
+        "close_time": "2026-10-08T00:00:00Z",
     }
-    event = {"id": "9", "title": "Bitcoin on October 7", "slug": "bitcoin", "liquidity": "20000"}
-    quotes = quotes_from_polymarket_market(market, event)
+    quotes = quotes_from_kalshi_market(market, {"title": "Bitcoin on October 7", "event_ticker": "KXBTC"})
     assert {item.side for item in quotes} == {"yes", "no"}
     yes = next(item for item in quotes if item.side == "yes")
     assert yes.ask == 0.94
     assert yes.fee_rate == 0.07
-    no = next(item for item in quotes if item.side == "no")
-    assert round(no.bid, 2) == 0.06
+    assert yes.venue == "kalshi"
 
     stub = {
         "ticker": "KXTEST-1",
@@ -311,34 +280,29 @@ def test_parsers_keep_a_real_favorite_and_drop_a_stub():
     assert quotes_from_kalshi_market(stub) == []
 
 
-def test_engine_paper_cycle_buys_the_cheap_favorite(tmp_path):
-    cheap = make_quote()
-    rich = make_quote(
-        venue="kalshi", market_id="KX1", event_id="KX1",
-        bid=0.97, ask=0.98, min_shares=1, fee_model="kalshi",
-        liquidity=80, volume=80, ask_size=15,
-    )
+def test_engine_paper_cycle_buys_when_the_record_clears(tmp_path):
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
     engine.decider = lambda _proposals: {}
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked both resolution rules. Same contract.")
+    _seed_record(engine.store)
     state = engine.run_cycle()
     assert state["counts"]["bought"] == 1
     assert state["book"]["cash"] < 1000
     assert state["book"]["equity"] < 1000  # the spread and the fee show up immediately
-    assert state["positions"][0]["venue"] == "polymarket"
+    assert state["positions"][0]["venue"] == "kalshi"
     assert state["mode"] == "paper"
 
 
 def test_a_pause_during_the_scan_blocks_the_fill(tmp_path):
-    cheap, rich = _cross_pair()
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+    _seed_record(engine.store)
 
     def depth_then_pause(_quote, shares, _action):
         engine.store.set_pause(True)
@@ -353,12 +317,12 @@ def test_a_pause_during_the_scan_blocks_the_fill(tmp_path):
 
 
 def test_a_block_during_the_scan_blocks_the_fill(tmp_path):
-    cheap, rich = _cross_pair()
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+    _seed_record(engine.store)
 
     def depth_then_block(quote, shares, _action):
         engine.store.block(quote.key, "Blocked while the book was being read.")
@@ -375,7 +339,7 @@ def test_a_stop_can_fire_before_the_next_scan(tmp_path):
     settings = Settings(data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
-    PaperBroker(engine.store).buy(quote, quote.min_shares, "cross_venue", "test", engine.store.cycle())
+    PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", engine.store.cycle())
     assert engine.store.positions()[0].opened_cycle == engine.store.cycle()
     engine.depth = _cover
     engine.refresher = lambda *_args: make_quote(bid=0.90, ask=0.91)
@@ -388,18 +352,13 @@ def test_a_stop_can_fire_before_the_next_scan(tmp_path):
 
 
 def test_drawdown_pauses_new_buys(tmp_path):
-    cheap = make_quote()
-    rich = make_quote(
-        venue="kalshi", market_id="KX1", event_id="KX1",
-        bid=0.97, ask=0.98, min_shares=1, fee_model="kalshi",
-        liquidity=80, volume=80, ask_size=15,
-    )
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000, max_drawdown=0.05)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
     engine.decider = lambda _proposals: {}
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked both resolution rules. Same contract.")
+    _seed_record(engine.store)
     engine.store.set_cash(900)
     with engine.store.lock:
         engine.store._put("peak", 1000)
@@ -424,6 +383,8 @@ def test_dashboard_and_health(tmp_path):
         assert "Scan now" in page.text
         assert "Live unavailable" in page.text
         assert "Pause buys" in page.text
+        assert "Kalshi" in page.text
+        assert "Polymarket" not in page.text
         state = client.get("/api/state")
         body = state.json()
         assert body["book"]["equity"] == 1000
@@ -468,87 +429,31 @@ def test_source_never_places_an_order():
     dashboard = "\n".join(path.read_text() for path in DASHBOARD.rglob("*") if path.suffix in {".html", ".js"})
     assert "/portfolio/" not in text
     assert "create_and_post_order" not in text
-    assert "clob.polymarket.com/order" not in text
+    assert "polymarket" not in text.lower()
+    assert "approve-pair" not in text
     assert "Arm live" not in dashboard
-    assert "approve-pair" in dashboard
-
-
-def test_polymarket_price_alone_does_not_settle():
-    market = {
-        "id": "1",
-        "question": "Will the price of Bitcoin be above $82,000 on October 7?",
-        "outcomes": ["Yes", "No"],
-        "outcomePrices": ["1", "0"],
-        "bestBid": 0.99,
-        "bestAsk": 0.995,
-        "clobTokenIds": ["yes-token", "no-token"],
-        "endDate": "2026-10-08T00:00:00Z",
-        "active": True,
-        "closed": False,
-        "acceptingOrders": True,
-    }
-    live = quotes_from_polymarket_market(market, {"id": "9", "title": "Bitcoin"})
-    assert live
-    assert all(not item.settled for item in live)
-    assert next(item for item in live if item.side == "yes").token_id == "yes-token"
-    closed = dict(market, closed=True, active=False, umaResolutionStatus="")
-    unresolved = quotes_from_polymarket_market(closed, {"id": "9", "title": "Bitcoin"})
-    assert unresolved == []
-    dust = dict(closed, outcomePrices=["0", "0"], bestBid=None, bestAsk=None, umaResolutionStatus=None)
-    assert quotes_from_polymarket_market(dust, {"id": "9"}) == []
-
-
-def test_polymarket_uma_resolved_settles():
-    market = {
-        "id": "1",
-        "question": "Resolved favorite",
-        "outcomes": ["Yes", "No"],
-        "outcomePrices": ["1", "0"],
-        "closed": True,
-        "active": False,
-        "umaResolutionStatus": "resolved",
-        "clobTokenIds": "[\"yes-token\", \"no-token\"]",
-    }
-    quotes = quotes_from_polymarket_market(market, {"id": "9", "title": "Resolved"})
-    yes = next(item for item in quotes if item.side == "yes")
-    assert yes.settled is True
-    assert yes.winner == "yes"
-    assert yes.token_id == "yes-token"
+    assert "approve-pair" not in dashboard
+    assert "Polymarket" not in dashboard
+    assert "Kalshi" in dashboard
 
 
 def test_displayed_size_has_to_cover_the_clip():
-    thin = judge_polymarket_book(
-        {"bids": [{"price": "0.93", "size": "10"}], "asks": [{"price": "0.94", "size": "4"}]},
-        "buy",
-        0.94,
-        5,
-    )
-    assert thin.ok is False
-    covered = judge_polymarket_book(
-        {"asks": [{"price": "0.94", "size": "3"}, {"price": "0.93", "size": "3"}]},
-        "buy",
-        0.94,
-        5,
-    )
-    assert covered.ok is True
-    moved = judge_polymarket_book({"asks": [{"price": "0.96", "size": "20"}]}, "buy", 0.94, 5)
-    assert moved.ok is False
-    assert judge_polymarket_book(None, "buy", 0.94, 5).ok is False
     book = {"orderbook_fp": {"yes_dollars": [["0.93", "4"]], "no_dollars": [["0.06", "8"]]}}
     assert judge_kalshi_orderbook(book, "yes", "buy", 0.94, 5).ok is True
     assert judge_kalshi_orderbook(book, "yes", "buy", 0.94, 9).ok is False
     assert judge_kalshi_orderbook(book, "yes", "buy", 0.93, 1).ok is False
     assert judge_kalshi_orderbook({"orderbook": {}}, "yes", "buy", 0.94, 1).ok is False
+    assert judge_kalshi_orderbook(None, "yes", "buy", 0.94, 1).ok is False
 
 
 def test_thin_book_does_not_fill(tmp_path):
-    cheap, rich = _cross_pair()
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.decider = lambda _proposals: {}
     engine.depth = lambda _quote, _shares, _action: DepthResult(False, 1, "The size on the offer is 1, short of 5.")
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+    _seed_record(engine.store)
     state = engine.run_cycle()
     assert state["counts"]["bought"] == 0
     assert state["book"]["cash"] == 1000
@@ -558,7 +463,7 @@ def test_thin_book_does_not_fill(tmp_path):
 
 
 def test_decisions_veto_cannot_add_a_clip_and_a_bad_body_drops_nothing():
-    mapping = {"c0": "polymarket:m1:yes"}
+    mapping = {"c0": "kalshi:m1:yes"}
     dropped = parse_veto({
         "answers": [
             {
@@ -578,7 +483,7 @@ def test_decisions_veto_cannot_add_a_clip_and_a_bad_body_drops_nothing():
             },
         ]
     }, mapping)
-    assert set(dropped) == {"polymarket:m1:yes"}
+    assert set(dropped) == {"kalshi:m1:yes"}
     assert parse_veto("nope", mapping) == {}
     assert parse_veto({}, mapping) == {}
     assert parse_veto({"answers": [{"name": "c0", "choice": "drop"}]}, mapping) == {}
@@ -591,12 +496,12 @@ def test_decisions_veto_cannot_add_a_clip_and_a_bad_body_drops_nothing():
 
 
 def test_a_veto_removes_the_buy(tmp_path):
-    cheap, rich = _cross_pair()
+    quote = make_quote()
     settings = Settings(data_dir=str(tmp_path), min_stable_scans=1, bankroll=1000)
-    engine = Engine(settings, fetcher=lambda _settings: ([cheap, rich], []))
+    engine = Engine(settings, fetcher=lambda _settings: ([quote], []))
     engine.refresher = lambda *_args: None
     engine.depth = _cover
-    engine.store.approve_pair(pair_id(cheap.key, rich.key), "Checked the resolution rules.")
+    _seed_record(engine.store)
     engine.decider = lambda proposals: {proposals[0].key: "same risk"} if proposals else {"invented:1:yes": "buy"}
     state = engine.run_cycle()
     assert state["counts"]["bought"] == 0
@@ -615,7 +520,7 @@ def test_pause_block_and_tighten_stick(tmp_path):
         paused = client.post("/api/pause", headers=headers, json={"paused": True})
         assert paused.status_code == 200
         assert paused.json()["operator_pause"] is True
-        blocked = client.post("/api/block", headers=headers, json={"key": "polymarket:m1:yes"})
+        blocked = client.post("/api/block", headers=headers, json={"key": "kalshi:m1:yes"})
         assert blocked.status_code == 200
         tightened = client.post("/api/knob", headers=headers, json={"key": "min_probability"})
         assert tightened.status_code == 200
@@ -623,11 +528,11 @@ def test_pause_block_and_tighten_stick(tmp_path):
         assert probability["value"] == 0.91
         clock = client.post("/api/knob", headers=headers, json={"key": "scan_interval_seconds"})
         assert clock.status_code == 400
-        empty = client.post("/api/approve-pair", headers=headers, json={"pair_id": "a|b", "note": "  "})
-        assert empty.status_code == 400
+        missing = client.post("/api/approve-pair", headers=headers, json={"pair_id": "a|b", "note": "same contract"})
+        assert missing.status_code == 404
     other = Store(tmp_path / "book.sqlite", StrategyParams(), 1000)
     assert other.operator_pause() is True
-    assert "polymarket:m1:yes" in other.blocked()
+    assert "kalshi:m1:yes" in other.blocked()
     assert other.params().min_probability == 0.91
     assert other.audit()
 
@@ -654,23 +559,6 @@ def test_manual_close_needs_size(tmp_path):
 
 
 def test_refresh_keeps_a_book_pinned_at_the_rail():
-    market = {
-        "id": "1",
-        "question": "Pinned favorite",
-        "outcomes": ["Yes", "No"],
-        "bestBid": 0.99,
-        "bestAsk": 1,
-        "active": True,
-        "closed": False,
-        "acceptingOrders": True,
-    }
-    event = {"id": "9", "title": "Pinned"}
-    assert quotes_from_polymarket_market(market, event) == []
-    kept = quotes_from_polymarket_market(market, event, keep_extremes=True)
-    yes = next(item for item in kept if item.side == "yes")
-    assert (yes.bid, yes.ask) == (0.99, 1.0)
-    no = next(item for item in kept if item.side == "no")
-    assert no.bid == 0.0
     kalshi = {
         "ticker": "KXTEST-1",
         "event_ticker": "KXTEST",
@@ -684,23 +572,35 @@ def test_refresh_keeps_a_book_pinned_at_the_rail():
     }
     assert quotes_from_kalshi_market(kalshi) == []
     marked = quotes_from_kalshi_market(kalshi, keep_extremes=True)
-    assert next(item for item in marked if item.side == "yes").bid == 0.99
+    yes = next(item for item in marked if item.side == "yes")
+    assert yes.bid == 0.99
+    assert yes.settled is False
+    resolved = dict(kalshi, status="settled", result="yes")
+    settled = quotes_from_kalshi_market(resolved, keep_extremes=True)
+    winner = next(item for item in settled if item.side == "yes")
+    assert winner.settled is True
+    assert winner.winner == "yes"
+    priced_only = dict(kalshi, status="settled", result="")
+    unmarked = quotes_from_kalshi_market(priced_only, keep_extremes=True)
+    assert unmarked
+    assert all(not item.settled for item in unmarked)
 
 
 def test_refresh_does_not_borrow_the_other_side(tmp_path, monkeypatch):
     yes = make_quote(bid=0.99, ask=1.0)
-    monkeypatch.setattr("cst.engine.fetch_polymarket_market", lambda *_args, **_kwargs: [yes])
+    monkeypatch.setattr("cst.engine.fetch_kalshi_ticker", lambda *_args, **_kwargs: [yes])
     engine = Engine(Settings(data_dir=str(tmp_path)), fetcher=lambda _settings: ([], []))
     assert quote_on_side([yes], "no") is None
-    assert engine._refresh("polymarket", "m1", "no") is None
-    assert engine._refresh("polymarket", "m1", "yes").bid == 0.99
+    assert engine._refresh("kalshi", "m1", "no") is None
+    assert engine._refresh("kalshi", "m1", "yes").bid == 0.99
+    assert engine._refresh("other", "m1", "yes") is None
 
 
 def test_a_pinned_winner_is_marked_and_a_zero_bid_stops(tmp_path):
     settings = Settings(data_dir=str(tmp_path), bankroll=1000)
     engine = Engine(settings, fetcher=lambda _settings: ([], []))
     quote = make_quote()
-    PaperBroker(engine.store).buy(quote, quote.min_shares, "cross_venue", "test", 1)
+    PaperBroker(engine.store).buy(quote, quote.min_shares, "learned", "test", 1)
     engine.depth = _cover
     engine.refresher = lambda *_args: make_quote(bid=0.99, ask=1.0)
     engine.mark_open()

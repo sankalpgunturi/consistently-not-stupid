@@ -4,11 +4,11 @@ Living log for Consistently Not Stupid. Update this file at the end of each phas
 
 ## Intent
 
-A real Kalshi and Polymarket desk. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one.
+A Kalshi paper desk. Polymarket was removed; do not add it back, and do not buy a favorite because the quote is high. Month one runs on a paper account of $1,000 so we can see if the rule survives fees. Live sending is unavailable; adding and arming it requires a later reviewed change after the paper observation window. The deterministic rule decides. A model may only remove a buy, never add one. A buy needs the settled record to clear the all-in cost. A new book stays in cash until that record exists.
 
 ## Phase 1 — Plan
 
-Status: revised after review. See Phase 2.
+Status: revised after review. See Phase 2. Phase 7 later removed Polymarket and pair approval. The list below is the plan that was executed then, not a reason to put either back.
 
 ### What already exists
 
@@ -82,4 +82,10 @@ Blind spots that were real, and what was done:
 
 A later pass closed three timing holes. A pause or a block that arrives while the scan is still reading the book is checked again immediately before each fill. A stop can fire on a mark in the same cycle the clip was opened. `/ws` closes a foreign `Origin` before it accepts, so the snapshot and the token stay on localhost.
 
-Left open, on purpose, and written in `docs/GAPS.md`: human pair approval, no live wire, the 0.6 drop threshold, tighten-only with a 90% floor, no login, the standard Kalshi fee, a scan that is not the whole venue, stops that can book a small loss, and Polymarket settlement that waits for UMA. None of those are patched by pretending the book has an edge.
+Left open at the time, and written in `docs/GAPS.md`: no live wire, the 0.6 drop threshold, tighten-only with a 90% floor, no login, the standard Kalshi fee, a scan that is not the whole venue, and stops that can book a small loss. None of those are patched by pretending the book has an edge.
+
+## Phase 7 — Kalshi only
+
+Status: done. Polymarket is out of the repo: the Gamma reader, the CLOB depth check, the fee schedule, the pair-approval route, and the dashboard control. The desk reads Kalshi. A buy still needs the settled record. Cross-venue pair approval was the only other confirmation, and it cannot fire with one venue, so it is gone from the strategy and the page. An old sqlite file may still contain `approved_pairs`; the scan does not read it.
+
+Cold start is real. The Wilson lower bound of a perfect 30-for-30 record is about 89%, which does not clear a 90¢ ask plus the Kalshi fee. The book stays in cash until its own settlements are long enough. Do not invent a looser first-trade rule to get that record started.

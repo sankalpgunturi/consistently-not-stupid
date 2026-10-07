@@ -37,11 +37,6 @@ class CloseIn(BaseModel):
     id: str
 
 
-class PairIn(BaseModel):
-    pair_id: str
-    note: str
-
-
 class KnobIn(BaseModel):
     key: str
 
@@ -159,13 +154,6 @@ def create_app(engine: Engine, start_loop: bool = True, bind_host: str | None = 
         if not ok:
             return JSONResponse({"error": detail}, status_code=409)
         return engine.snapshot()
-
-    @app.post("/api/approve-pair")
-    def approve_pair(body: PairIn):
-        note = body.note.strip()
-        if not body.pair_id.strip() or not note:
-            return JSONResponse({"error": "A pair and a note on the resolution rules are required."}, status_code=400)
-        return engine.approve_pair(body.pair_id.strip(), note)
 
     @app.post("/api/knob")
     def knob(body: KnobIn):

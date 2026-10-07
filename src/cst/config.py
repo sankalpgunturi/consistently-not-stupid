@@ -22,10 +22,6 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
 
     kalshi_base_url: str = "https://external-api.kalshi.com/trade-api/v2"
-    polymarket_gamma_url: str = "https://gamma-api.polymarket.com"
-    polymarket_clob_url: str = "https://clob.polymarket.com"
-    polymarket_pages: int = 3
-    polymarket_page_size: int = 40
     kalshi_pages: int = 8
     kalshi_page_size: int = 200
 
@@ -43,15 +39,12 @@ class Settings(BaseSettings):
     scan_interval_seconds: int = 600
     mark_interval_seconds: int = 60
     min_stable_scans: int = 2
-    match_similarity: float = 0.74
     correlation_threshold: float = 0.48
-    min_liquidity: float = 500
     min_sample: int = 30
     max_new_per_cycle: int = 10
 
     kalshi_api_key_id: str = ""
     kalshi_private_key_path: str = ""
-    polymarket_private_key: str = ""
 
     def seed_params(self) -> StrategyParams:
         return StrategyParams(
@@ -69,9 +62,7 @@ class Settings(BaseSettings):
             scan_interval_seconds=self.scan_interval_seconds,
             mark_interval_seconds=self.mark_interval_seconds,
             min_stable_scans=self.min_stable_scans,
-            match_similarity=self.match_similarity,
             correlation_threshold=self.correlation_threshold,
-            min_liquidity=self.min_liquidity,
             min_sample=self.min_sample,
             max_new_per_cycle=self.max_new_per_cycle,
         )

@@ -1,8 +1,8 @@
 """Title matching.
 
-Two scores, on purpose. ``same_proposition`` is strict and is the only
-score allowed to treat two venues as one price. ``related`` is looser and
-is how the book refuses a second copy of a risk it already holds.
+``same_proposition`` is strict: different numbers, dates, or sides are not
+the same contract. ``related`` is looser and is how the book refuses a
+second copy of a risk it already holds.
 """
 
 from __future__ import annotations

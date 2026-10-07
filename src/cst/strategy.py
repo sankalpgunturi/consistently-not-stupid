@@ -5,8 +5,7 @@ The economic law, which the retrospective is not allowed to turn off:
 * Pay the ask only when both sides of the book are already at the probability bar.
 * If the contract wins, the payout has to clear the venue fee by ``min_win_profit``.
 * A market quote alone is not an edge. Buying it, when the quote is right,
-  loses the fee. A buy needs a settled record, or a second venue the operator
-  has marked as the same contract, sitting above the all-in cost.
+  loses the fee. A buy needs a settled record sitting above the all-in cost.
 * One clip is the venue minimum. A second copy of the same risk is refused.
 """
 
@@ -19,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from cst.fees import fee_for
 from cst.models import BookView, Decision, Proposal, Quote, StrategyParams
-from cst.text import related, same_proposition
+from cst.text import related
 
 
 @dataclass
@@ -103,10 +102,7 @@ def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[st
     """Return a skip code, or None when the quote clears the structural gates."""
     if quote.ask_size >= 0 and quote.ask_size + 1e-9 < quote.min_shares:
         return "book", "The size on the offer is smaller than the venue minimum."
-    if quote.venue == "polymarket":
-        if quote.liquidity + 1e-9 < params.min_liquidity:
-            return "liquidity", "The book is too thin to treat the quote as a real price."
-    elif quote.volume < 10 and quote.liquidity < 10:
+    if quote.volume < 10 and quote.liquidity < 10:
         return "liquidity", "Almost no contracts have traded, so the quote is not a crowd."
     hours = _hours_left(quote, now)
     if hours is None:
@@ -119,62 +115,6 @@ def _structural(quote: Quote, params: StrategyParams, now: datetime) -> tuple[st
     if not ok:
         return "fee", detail
     return None
-
-
-def pair_id(left: str, right: str) -> str:
-    return "|".join(sorted((left, right)))
-
-
-def _pair_signals(eligible: list[Quote], params: StrategyParams, approved: set[str]) -> tuple[dict[str, Proposal], list[Proposal]]:
-    """Title similarity is a candidate. Only an operator-approved pair becomes a buy."""
-    by_venue: dict[str, list[Quote]] = defaultdict(list)
-    for quote in eligible:
-        by_venue[quote.venue].append(quote)
-    venues = [v for v, rows in by_venue.items() if rows]
-    best: dict[str, Proposal] = {}
-    pending: dict[str, Proposal] = {}
-    if len(venues) < 2:
-        return best, []
-    for i, left_name in enumerate(venues):
-        for right_name in venues[i + 1 :]:
-            for left in by_venue[left_name]:
-                for right in by_venue[right_name]:
-                    score = same_proposition(
-                        left.title, left.outcome, left.side,
-                        right.title, right.outcome, right.side,
-                    )
-                    if score + 1e-12 < params.match_similarity:
-                        continue
-                    for buy, confirm in ((left, right), (right, left)):
-                        _ok, per_share, _profit, _fee_detail = _fee_ok(buy, params)
-                        edge = confirm.bid - buy.ask - per_share
-                        if edge + 1e-12 < params.min_edge:
-                            continue
-                        if confirm.bid + 1e-12 < params.min_probability:
-                            continue
-                        ident = pair_id(buy.key, confirm.key)
-                        detail = (
-                            f"{buy.venue.title()} ask {_cents(buy.ask)}, "
-                            f"{confirm.venue.title()} bid {_cents(confirm.bid)}, "
-                            f"fee {_cents(per_share)}, edge {_cents(edge)}. "
-                            f"The titles match ({score:.2f})."
-                        )
-                        proposal = Proposal(
-                            quote=buy,
-                            shares=buy.min_shares,
-                            edge=edge,
-                            signal="cross_venue",
-                            detail=detail,
-                            confirm=f"{confirm.venue} bid {_cents(confirm.bid)}",
-                            pair_id=ident,
-                        )
-                        slot = best if ident in approved else pending
-                        current = slot.get(buy.key)
-                        if current is not None and current.edge >= edge:
-                            continue
-                        slot[buy.key] = proposal
-    waiting = [item for key, item in pending.items() if key not in best]
-    return best, waiting
 
 
 def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Proposal | None:
@@ -221,7 +161,6 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         "fee_ok": 0,
         "stable": 0,
         "confirmed": 0,
-        "candidates": 0,
         "kept": 0,
         "bought": 0,
     }
@@ -251,20 +190,7 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         counts["stable"] += 1
         eligible.append(quote)
 
-    signals, waiting = _pair_signals(eligible, params, book.approved_pairs)
-    waiting_keys = {item.key for item in waiting}
-    counts["candidates"] = len({item.pair_id for item in waiting if item.quote.key not in book.blocked})
-    for proposal in waiting:
-        if proposal.quote.key in book.blocked:
-            rows.append(_Row(proposal.quote, "block", "The operator blocked this contract.", edge=proposal.edge))
-            continue
-        rows.append(_Row(
-            proposal.quote,
-            "equivalence",
-            proposal.detail + " Titles are not resolution rules. Confirm the pair before a buy.",
-            edge=proposal.edge,
-            proposal=proposal,
-        ))
+    signals: dict[str, Proposal] = {}
     for quote in eligible:
         if quote.key in signals:
             continue
@@ -293,12 +219,12 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
 
     signal_keys = set(signals)
     for quote in eligible:
-        if quote.key in signal_keys or quote.key in waiting_keys:
+        if quote.key in signal_keys:
             continue
         _ok, per_share, _profit, fee_detail = _fee_ok(quote, params)
         detail = (
             f"{fee_detail} If this quote is the true chance, the expected result is a loss of "
-            f"{_cents(per_share)} a share to the fee. No second venue and no settled record says it is cheap."
+            f"{_cents(per_share)} a share to the fee. No settled record says it is cheap."
         )
         rows.append(_Row(quote, "edge", detail, edge=-per_share, group=quote.event_id or quote.key))
 

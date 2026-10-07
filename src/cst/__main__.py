@@ -15,7 +15,7 @@ from cst.decisions import veto_proposals
 from cst.engine import Engine
 from cst.models import BookView
 from cst.simulate import run_report
-from cst.strategy import evaluate, pair_id
+from cst.strategy import evaluate
 
 
 def main() -> None:
@@ -27,7 +27,7 @@ def main() -> None:
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
 
-    sub.add_parser("cycle", help="Read both books once and update the paper account")
+    sub.add_parser("cycle", help="Read the Kalshi book once and update the paper account")
     sub.add_parser("simulate", help="Print the model of the rule")
     sub.add_parser("reset", help="Wipe the paper book back to the starting cash")
     sub.add_parser("bench", help="Time evaluate, and one Decisions call if a key is set. Does not touch the book.")
@@ -76,9 +76,9 @@ def _bench(settings) -> None:
 
     now = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
     cheap = Quote(
-        venue="polymarket",
-        market_id="bench-poly",
-        event_id="bench-poly",
+        venue="kalshi",
+        market_id="KXBTCD-BENCH-A",
+        event_id="KXBTCD-BENCH-A",
         event_title="Bitcoin on October 7",
         title="Will the price of Bitcoin be above $82,000 on October 7?",
         outcome="Yes",
@@ -90,11 +90,10 @@ def _bench(settings) -> None:
         liquidity=20_000,
         end_time=now + timedelta(hours=20),
         category="Crypto",
-        fee_model="polymarket",
-        fee_rate=0.04,
+        fee_model="kalshi",
+        fee_rate=0.07,
         fee_exponent=1,
-        min_shares=5,
-        token_id="bench-token",
+        min_shares=1,
     )
     rich = Quote(
         venue="kalshi",
@@ -124,7 +123,6 @@ def _bench(settings) -> None:
         peak=1000,
         deployed=0,
         streaks={cheap.key: 2, rich.key: 2},
-        approved_pairs={pair_id(cheap.key, rich.key)},
     )
     started = time.perf_counter()
     result = evaluate([cheap, rich], params, book, now=now)

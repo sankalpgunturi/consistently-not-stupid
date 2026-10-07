@@ -96,8 +96,7 @@ function render(next) {
     [counts.favorites, "at the bar"],
     [counts.fee_ok, "fee still leaves a profit"],
     [counts.stable, "held still"],
-    [counts.confirmed, "second price"],
-    [counts.candidates, "awaiting you"],
+    [counts.confirmed, "settled record"],
     [counts.bought, "bought"],
   ];
   $("funnel").innerHTML = steps.map(([value, label]) =>
@@ -108,7 +107,7 @@ function render(next) {
   $("focus-title").textContent = focus ? focus.title : "Waiting for the first scan";
   $("focus-detail").textContent = focus
     ? `${focus.venue ? focus.venue + " · " : ""}${focus.outcome ? focus.outcome + ". " : ""}${focus.detail || ""}`
-    : "The desk is about to read both books.";
+    : "The desk is about to read Kalshi.";
 
   drawEquity(next.equity_curve || [], book.start || 1000);
   renderPositions(next.positions || []);
@@ -201,10 +200,6 @@ function renderTape(rows, cycle) {
 
 function rowActions(row) {
   const bits = [];
-  if (row.reason_code === "equivalence" && row.pair_id) {
-    bits.push(`<input class="note" data-note="${esc(row.pair_id)}" placeholder="What you checked in the rules" />`);
-    bits.push(`<button type="button" class="mini" data-approve="${esc(row.pair_id)}">Approve pair</button>`);
-  }
   if (row.key && !(row.group_count > 1)) {
     bits.push(`<button type="button" class="mini" data-block="${esc(row.key)}">Block</button>`);
   }
@@ -233,7 +228,7 @@ function renderModel(sim) {
       <td class="num">${esc(Math.round(book.paths_under_start * 100))}%</td>
     </tr>
   `).join("");
-  $("model-note").textContent = `${sim.note || ""} On the chart, red buys every favorite, cream is this desk when the quote is right, and green is this desk when a second venue is higher.`;
+  $("model-note").textContent = `${sim.note || ""} On the chart, red buys every favorite, cream is this desk when the quote is right, and green is this desk when the settled record sits above the ask.`;
   drawModel(sim);
 }
 
@@ -253,14 +248,13 @@ function formatKnob(row) {
   const cents = new Set(["min_edge", "min_win_profit", "max_spread", "stop_gap"]);
   const percent = new Set([
     "min_probability", "max_position_fraction", "max_deployed_fraction",
-    "max_category_fraction", "max_drawdown", "match_similarity", "correlation_threshold",
+    "max_category_fraction", "max_drawdown", "correlation_threshold",
   ]);
   if (cents.has(row.key)) return `${(value * 100).toFixed(1)}¢`;
   if (percent.has(row.key)) return `${(value * 100).toFixed(1)}%`;
   if (row.key === "scan_interval_seconds") return `${Math.round(value / 60)} min`;
   if (row.key === "min_hours_to_expiry") return `${value} hours`;
   if (row.key === "max_days_to_expiry") return `${value} days`;
-  if (row.key === "min_liquidity") return money(value, 0);
   return String(row.value);
 }
 
@@ -405,15 +399,7 @@ $("reset").addEventListener("click", async () => {
 document.body.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
-  if (target.dataset.approve) {
-    const note = document.querySelector(`[data-note="${CSS.escape(target.dataset.approve)}"]`);
-    const text = note ? note.value.trim() : "";
-    if (!text) {
-      window.alert("Write what you checked in the resolution rules before approving the pair.");
-      return;
-    }
-    await post("/api/approve-pair", { pair_id: target.dataset.approve, note: text });
-  } else if (target.dataset.block) {
+  if (target.dataset.block) {
     await post("/api/block", { key: target.dataset.block });
   } else if (target.dataset.close) {
     if (!confirm("Close this paper clip at the current bid, if the book can fill it?")) return;

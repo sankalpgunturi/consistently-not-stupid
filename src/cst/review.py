@@ -74,13 +74,13 @@ def heuristic_updates(
 def heuristic_summary(counts: dict[str, int], bought: int) -> str:
     if bought:
         noun = "clip" if bought == 1 else "clips"
-        return f"Bought {bought} minimum {noun} that cleared the fee and a second price."
+        return f"Bought {bought} minimum {noun} that cleared the fee and the settled record."
     favorites = counts.get("favorites", 0)
     if favorites == 0:
         return "No live quote had both sides of the book at the probability bar."
     if counts.get("confirmed", 0) == 0:
         return (
-            "Favorites were on the board. None were cheap versus another venue or versus the settled record, "
+            "Favorites were on the board. None were cheap versus the settled record, "
             "so the book stayed in cash."
         )
     return "A price looked cheap, then the portfolio rules set it aside as a twin, a cap, or a pause."

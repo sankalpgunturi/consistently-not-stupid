@@ -73,9 +73,7 @@ class StrategyParams:
     scan_interval_seconds: int = 600
     mark_interval_seconds: int = 60
     min_stable_scans: int = 2
-    match_similarity: float = 0.74
     correlation_threshold: float = 0.48
-    min_liquidity: float = 500
     min_sample: int = 30
     max_new_per_cycle: int = 10
 
@@ -103,9 +101,7 @@ RAILS: dict[str, tuple[float, float]] = {
     "stop_gap": (0.04, 0.15),
     "scan_interval_seconds": (60, 3600),
     "min_stable_scans": (1, 6),
-    "match_similarity": (0.62, 0.92),
     "correlation_threshold": (0.35, 0.75),
-    "min_liquidity": (100, 20000),
     "min_sample": (20, 100),
     "max_new_per_cycle": (1, 20),
 }
@@ -124,9 +120,7 @@ STEPS: dict[str, float] = {
     "stop_gap": 0.01,
     "scan_interval_seconds": 60,
     "min_stable_scans": 1,
-    "match_similarity": 0.02,
     "correlation_threshold": 0.02,
-    "min_liquidity": 100,
     "min_sample": 5,
     "max_new_per_cycle": 1,
 }
@@ -150,15 +144,13 @@ LOOSEN_DOWN = frozenset({
     "min_edge",
     "min_hours_to_expiry",
     "min_stable_scans",
-    "match_similarity",
-    "min_liquidity",
     "min_sample",
 })
 
 PARAM_COPY: dict[str, tuple[str, str]] = {
     "min_probability": ("Minimum probability", "Bid and ask both have to clear this."),
     "min_win_profit": ("Profit if it wins", "Cents per share that must remain after the fee."),
-    "min_edge": ("Minimum edge", "How far a second price has to sit above our all-in cost."),
+    "min_edge": ("Minimum edge", "How far the settled record has to sit above our all-in cost."),
     "max_spread": ("Maximum spread", "Wider books are not a probability, they are a guess."),
     "max_days_to_expiry": ("Furthest expiry", "Days of calendar risk the book will still enter."),
     "min_hours_to_expiry": ("Nearest expiry", "Hours left required before a new buy."),
@@ -167,11 +159,9 @@ PARAM_COPY: dict[str, tuple[str, str]] = {
     "max_category_fraction": ("Category cap", "Fraction of equity allowed in one theme."),
     "max_drawdown": ("Pause line", "New buys pause after this fall from the peak."),
     "stop_gap": ("Exit gap", "Sell if the bid falls this far under the price we paid."),
-    "scan_interval_seconds": ("Scan every", "Seconds between full reads of both books."),
+    "scan_interval_seconds": ("Scan every", "Seconds between full reads of the Kalshi book."),
     "min_stable_scans": ("Stable scans", "Consecutive scans a favorite must stay in band."),
-    "match_similarity": ("Same-market bar", "How close two titles must be to share a price."),
     "correlation_threshold": ("Twin bar", "Overlap that counts as the same risk."),
-    "min_liquidity": ("Minimum depth", "Polymarket liquidity required, in dollars."),
     "min_sample": ("Record length", "Settled trades in a price bucket before that record can buy."),
     "max_new_per_cycle": ("New buys per scan", "Cap on clips opened in one pass."),
 }

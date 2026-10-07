@@ -43,36 +43,6 @@ def _cover(available: float, shares: float, action: str) -> DepthResult:
     return DepthResult(True, available, "The displayed size covers the clip.")
 
 
-def judge_polymarket_book(payload: dict | list | None, action: str, limit: float, shares: float) -> DepthResult:
-    if not isinstance(payload, dict):
-        return _fail("The book could not be read, so the clip was not filled.")
-    raw = payload.get("asks" if action == "buy" else "bids")
-    if not isinstance(raw, list):
-        return _fail("The book could not be read, so the clip was not filled.")
-    levels: list[tuple[float, float]] = []
-    for level in raw:
-        if not isinstance(level, dict):
-            continue
-        price = _num(level.get("price"))
-        size = _num(level.get("size"))
-        if price is None or size is None or size < 0:
-            continue
-        levels.append((price, size))
-    if not levels:
-        return _fail("The book had no size at the price we needed.")
-    if action == "buy":
-        best = min(price for price, _size in levels)
-        if best > limit + 1e-6:
-            return _fail("The ask moved away from the price we were willing to pay.")
-        available = sum(size for price, size in levels if price <= limit + 1e-9)
-    else:
-        best = max(price for price, _size in levels)
-        if best + 1e-6 < limit:
-            return _fail("The bid moved away from the price we were willing to sell.")
-        available = sum(size for price, size in levels if price + 1e-9 >= limit)
-    return _cover(available, shares, action)
-
-
 def _bid_pairs(raw, dollars: bool) -> list[tuple[float, float]]:
     found: list[tuple[float, float]] = []
     if not isinstance(raw, list):
@@ -130,14 +100,6 @@ def live_depth(settings, quote: Quote, shares: float, action: str) -> DepthResul
     limit = quote.ask if action == "buy" else quote.bid
     client = MarketHttp()
     try:
-        if quote.venue == "polymarket":
-            if not quote.token_id:
-                return _fail("The token id is missing, so the book could not be read.")
-            payload = client.get_json(
-                f"{settings.polymarket_clob_url.rstrip('/')}/book",
-                params={"token_id": quote.token_id},
-            )
-            return judge_polymarket_book(payload, action, limit, shares)
         if quote.venue == "kalshi":
             payload = client.get_json(
                 f"{settings.kalshi_base_url.rstrip('/')}/markets/{quote.market_id}/orderbook",

@@ -1,6 +1,6 @@
 # Consistently Not Stupid
 
-Paper desk for high-probability Kalshi and Polymarket contracts. The aim is to be consistently not stupid, instead of trying to be very intelligent. Live orders are not implemented. The import package and the `cst` command stay `cst`.
+Paper desk for high-probability Kalshi contracts. The aim is to be consistently not stupid, instead of trying to be very intelligent. Live orders are not implemented. The import package and the `cst` command stay `cst`.
 
 ## Commands
 
@@ -19,8 +19,9 @@ Paper desk for high-probability Kalshi and Polymarket contracts. The aim is to b
 
 ## Do not
 
-- Add an order POST, a signing path, or an arm control. Public reads and the CLOB `/book` read are the only venue calls.
+- Add an order POST, a signing path, or an arm control. Public Kalshi reads are the only venue calls.
 - Let a model add a buy. It may only drop one the deterministic rule already proposed.
 - Loosen a knob, or move `min_probability` below 0.90. Overrides tighten one step inside `RAILS`.
-- Treat a similar title as settlement equivalence. A cross-venue buy needs `approved_pairs`.
+- Buy a favorite because the quote is high. A buy needs the settled record to clear the all-in cost. Do not lower that bar to open the first trade.
+- Treat a similar title as a reason to buy. Twins inside Kalshi are skipped by the correlation check.
 - Add a mutating `/api/*` route that skips `X-CSRF-Token`. Reject a foreign `Origin` on those routes and on `/ws` before the socket is accepted.

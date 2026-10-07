@@ -1,4 +1,4 @@
-"""One scan: read both books, admit a handful of clips, mark the rest, write the note."""
+"""One scan: read the Kalshi book, admit a handful of clips, mark the rest, write the note."""
 
 from __future__ import annotations
 
@@ -17,23 +17,13 @@ from cst.simulate import run_report
 from cst.store import Store
 from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker
-from cst.venues.polymarket import fetch_polymarket, fetch_polymarket_market
 
 log = logging.getLogger("cst.engine")
 
 
 def default_fetch(settings: Settings) -> tuple[list[Quote], list[str]]:
-    quotes: list[Quote] = []
-    errors: list[str] = []
-    poly, err = fetch_polymarket(settings.polymarket_gamma_url, settings.polymarket_pages, settings.polymarket_page_size)
-    quotes.extend(poly)
-    if err:
-        errors.append(err)
-    kalshi, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
-    quotes.extend(kalshi)
-    if err:
-        errors.append(err)
-    return quotes, errors
+    quotes, err = fetch_kalshi(settings.kalshi_base_url, settings.kalshi_pages, settings.kalshi_page_size)
+    return quotes, [err] if err else []
 
 
 def quote_on_side(quotes: list[Quote], side: str) -> Quote | None:
@@ -295,9 +285,7 @@ class Engine:
     def _refresh(self, venue: str, market_id: str, side: str) -> Quote | None:
         if self.refresher is not None:
             return self.refresher(venue, market_id, side)
-        if venue == "polymarket":
-            quotes = fetch_polymarket_market(self.settings.polymarket_gamma_url, market_id)
-        elif venue == "kalshi":
+        if venue == "kalshi":
             quotes = fetch_kalshi_ticker(self.settings.kalshi_base_url, market_id)
         else:
             return None
@@ -349,10 +337,6 @@ class Engine:
 
     def block_market(self, key: str) -> dict:
         self.store.block(key, "The operator blocked this contract.")
-        return self.snapshot()
-
-    def approve_pair(self, pair_id: str, note: str) -> dict:
-        self.store.approve_pair(pair_id, note)
         return self.snapshot()
 
     def tighten(self, key: str) -> tuple[dict, str | None]:

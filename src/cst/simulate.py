@@ -1,8 +1,8 @@
 """A small model of the rule, separate from the live paper book.
 
 Two worlds. In the fair world the quote is the true chance, so a favorite
-bought at the ask loses the fee. In the dislocated world some favorites are
-a few cents under a second venue. This desk trades only there.
+bought at the ask loses the fee and this desk does not trade. In the other
+world a settled record sits a few cents above the ask. This desk trades only there.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from cst.fees import polymarket_taker_fee
+from cst.fees import kalshi_taker_fee
 
 
 @dataclass
@@ -42,8 +42,8 @@ def _one(rng: random.Random, strategy: str, world: str, n: int, bankroll: float)
         if bid < 0.90 or ask < 0.90 or ask >= 0.995:
             curve.append(cash)
             continue
-        shares = 5
-        fee = float(polymarket_taker_fee(shares, ask, 0.04, 1))
+        shares = 1
+        fee = float(kalshi_taker_fee(shares, ask))
         per_share = fee / shares
         if (1 - ask - per_share) < 0.01:
             curve.append(cash)
@@ -99,7 +99,7 @@ def run_report(seed: int = 7, paths: int = 200, markets: int = 90, bankroll: flo
     specs = (
         ("naive", "fair", "Buy every 90% quote", "The quote is the true chance"),
         ("common", "fair", "Consistently Not Stupid", "The quote is the true chance"),
-        ("common", "dislocated", "Consistently Not Stupid", "Some second venues are a few cents higher"),
+        ("common", "dislocated", "Consistently Not Stupid", "A settled record sits above the ask"),
     )
     books = []
     curves = {}

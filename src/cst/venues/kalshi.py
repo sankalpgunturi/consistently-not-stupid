@@ -64,7 +64,7 @@ def _category(ticker: str, fallback: str = "Other") -> str:
 
 
 def _book_ok(bid: float, ask: float, keep_extremes: bool) -> bool:
-    """Same rule as the Polymarket parser: scans stay inside (0, 1), marks may pin."""
+    """Scans stay inside (0, 1). A mark of an open clip may pin at 0 or 1."""
     if bid < 0 or ask < 0 or ask > 1 or ask < bid:
         return False
     if bid == 0 and ask == 0:

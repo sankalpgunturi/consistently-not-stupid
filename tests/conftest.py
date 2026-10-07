@@ -7,7 +7,7 @@ NOW = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
 
 def make_quote(**overrides) -> Quote:
     data = dict(
-        venue="polymarket",
+        venue="kalshi",
         market_id="m1",
         event_id="e1",
         event_title="Bitcoin on October 7",
@@ -21,10 +21,10 @@ def make_quote(**overrides) -> Quote:
         liquidity=20_000,
         end_time=NOW + timedelta(hours=20),
         category="Crypto",
-        fee_model="polymarket",
-        fee_rate=0.04,
+        fee_model="kalshi",
+        fee_rate=0.07,
         fee_exponent=1,
-        min_shares=5,
+        min_shares=1,
     )
     data.update(overrides)
     return Quote(**data)
