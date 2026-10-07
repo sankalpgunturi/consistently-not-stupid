@@ -65,6 +65,8 @@ def test_scan_evidence_survives_restart_and_model_concerns_are_kept(tmp_path, mo
     assert state["retrospective"]["actual_bought"] == 0
     assert state["retrospective"]["concerns"] == ["Small sample."]
     assert reviewer.context["phase"] == "before fills"
+    assert reviewer.context["sample_refusals"]
+    assert reviewer.context["refusal_counts_are_disjoint"] is True
 
 
 def test_interrupted_fill_rolls_back_all_accounting(tmp_path, monkeypatch):

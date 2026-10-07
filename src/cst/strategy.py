@@ -260,10 +260,15 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         if quote.key in signal_keys:
             continue
         _ok, per_share, _profit, fee_detail = _fee_ok(quote, params)
-        detail = (
-            f"{fee_detail} If this quote is the true chance, the expected result is a loss of "
-            f"{_cents(per_share)} a share to the fee. No settled record says it is cheap."
-        )
+        bucket = price_bucket(quote.ask)
+        wins, sample = book.calibration.get(bucket, (0, 0))
+        lower = wilson_lower(wins, sample)
+        required = max(params.min_probability, quote.ask + per_share + params.min_edge)
+        if sample < params.min_sample:
+            why = f"The {bucket} bucket has {sample} samples; at least {params.min_sample} are required."
+        else:
+            why = f"The {bucket} bucket has {wins} wins in {sample} samples."
+        detail = f"{fee_detail} {why} Its cautious win rate is {lower:.1%}; this entry needs {required:.1%}."
         rows.append(_Row(quote, "edge", detail, edge=-per_share, group=quote.event_id or quote.key))
 
     proposals: list[Proposal] = []

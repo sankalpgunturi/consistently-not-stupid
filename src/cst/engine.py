@@ -228,6 +228,9 @@ class Engine:
                 "calibration": book.calibration,
                 "venue_errors": errors,
                 "refusals": refusal_counts(result.decisions),
+                "refusal_counts_are_disjoint": True,
+                "sample_refusals": [item.to_json() for item in result.decisions if item.action != "bought"][:20],
+                "agent_reviews": [row["reason"] for row in self.store.audit(12) if row["actor"] == "codex"][:3],
             }
         drops, suggestions, model_summary = self.reviewer.review(params, kept, result.counts, book.settlements)
         if getattr(self.reviewer, "last_error", None):
