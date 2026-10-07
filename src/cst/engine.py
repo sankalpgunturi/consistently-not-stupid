@@ -22,7 +22,7 @@ from cst.models import PARAM_COPY, RAILS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
+from cst.strategy import _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
 
 log = logging.getLogger("cst.engine")
@@ -348,6 +348,10 @@ class Engine:
                     key=proposal.key,
                 ))
                 continue
+            if fresh.entry_window_minutes > 0:
+                # The model saw an earlier quote; the ledger explanation must
+                # describe the refreshed price that is actually being filled.
+                proposal.detail = _fee_ok(proposal.quote, fresh)[3]
             trade = self.broker.buy(proposal.quote, proposal.shares, proposal.signal, proposal.detail, cycle)
             if trade is None:
                 decisions.append(Decision(

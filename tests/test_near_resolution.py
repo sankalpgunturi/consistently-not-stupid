@@ -185,3 +185,24 @@ def test_paper_holds_through_price_drop_then_settles(tmp_path, winner):
     assert not engine.store.positions()
     assert engine.store.trades()[0].action == "settle"
     assert bool(engine.store.trades()[0].won) == (q.side == winner)
+
+
+def test_fill_explanation_uses_refreshed_price_and_fee(tmp_path):
+    from cst.engine import Engine
+    from cst.depth import DepthResult
+    now = datetime.now(timezone.utc)
+    q = make_quote(bid=.94, ask=.95, end_time=now+timedelta(minutes=5),
+                   expected_resolution_time=now+timedelta(minutes=5))
+    engine = Engine(Settings(data_dir=str(tmp_path), min_stable_scans=1),
+                    fetcher=lambda _: ([q], []), decider=lambda _: {})
+    engine.depth = lambda _q, shares, _action: DepthResult(True, shares, 'covered')
+    engine.refresher = lambda *_: make_quote(bid=.96, ask=.97,
+        end_time=q.end_time, expected_resolution_time=q.expected_resolution_time)
+    state = engine.run_cycle()
+    assert state['counts']['bought'] == 1
+    trade = engine.store.trades()[0]
+    assert trade.price == .97
+    assert trade.fee == .01
+    assert 'Ask 97.0¢' in trade.reason
+    assert '2.0¢ a share' in trade.reason
+    assert engine.store.positions()[0].reason == trade.reason
