@@ -31,7 +31,7 @@ def test_compact_dashboard_keeps_account_history_without_loading_archives(tmp_pa
     full = engine.snapshot()
     def unexpected(*args, **kwargs):
         pytest.fail('Publisher must not load unused archives')
-    for method in ('research_summary', 'retros', 'decisions', 'equity_curve', 'audit'):
+    for method in ('research_summary', 'retros', 'decisions', 'equity_curve', 'audit', 'trade_reviews'):
         monkeypatch.setattr(engine.store, method, unexpected)
     with TestClient(create_app(engine, start_loop=False), base_url='http://127.0.0.1') as client:
         compact = client.get('/api/state?compact=true').json()

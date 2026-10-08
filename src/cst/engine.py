@@ -877,7 +877,7 @@ class Engine:
             "focus": info.get("focus"),
             "positions": [item.to_json() for item in positions],
             "trades": [item.to_json() for item in self.store.trades(-1)],
-            "trade_reviews": self.store.trade_reviews(),
+            "trade_reviews": {} if compact else self.store.trade_reviews(),
             "sale_reviews": self.store.sale_reviews(),
             "market_links": self.store.market_links(),
             "equity_curve": [] if compact else self.store.equity_curve(),
