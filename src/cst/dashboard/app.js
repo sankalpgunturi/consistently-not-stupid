@@ -225,12 +225,12 @@ function renderTrades(rows, positions = []) {
   more.textContent = `Show ${remaining} more`;
   more.setAttribute("aria-label", `Show ${remaining} more trades`);
   const time = (ts) => new Date(ts).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-  const cents = (n) => `${Number((n * 100).toFixed(3))}¢`;
+  const tradeMoney = (n) => Math.abs(n) >= 1 ? money(n) : `${Number((n * 100).toFixed(3))}¢`;
   $("trades-empty").classList.toggle("hidden", visible.length > 0);
   $("trades").innerHTML = visible.map(({entry, exit, position}) => {
     const row = entry || exit;
     const stopped = exit?.action === "sell" && /stop.loss|bid fell/i.test(exit.reason || "");
-    const paid = entry ? cents(entry.shares * entry.price + entry.fee) : "—";
+    const paid = entry ? tradeMoney(entry.shares * entry.price + entry.fee) : "—";
     const sale = exit?.action === "sell" ? state?.sale_reviews?.[exit.id] : null;
     const sold = exit?.action === "sell";
     const outcomeClass = sold ? (sale?.verdict === "good" ? "trade-win" : sale?.verdict === "bad" ? "trade-loss" : "")
@@ -260,19 +260,19 @@ function renderTrades(rows, positions = []) {
       ? `Bought at ${time(entry.ts)} when our pick was priced at ${probability}. Paid ${paid} including fees.`
       : 'The original purchase details are unavailable.';
     const why = Number.isFinite(winProfit) && winProfit > 0
-      ? `We entered ${entry?.signal === "paper_underdog" ? "against the favorite" : "for the high quoted probability"}, with ${cents(winProfit)} profit if our pick won.` : '';
+      ? `We entered ${entry?.signal === "paper_underdog" ? "against the favorite" : "for the high quoted probability"}, with ${tradeMoney(winProfit)} profit if our pick won.` : '';
     let outcomeStory;
     if (!exit) {
-      outcomeStory = `Waiting for the official result.${closeAt ? ` Market ${awaitingResult ? "closed" : "closes"} at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${cents(profitIfWin || 0)}. Lose: −${cents(paidValue || 0)}.`;
+      outcomeStory = `Waiting for the official result.${closeAt ? ` Market ${awaitingResult ? "closed" : "closes"} at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${tradeMoney(profitIfWin || 0)}. Lose: −${tradeMoney(paidValue || 0)}.`;
     } else if (exit.action === 'settle') {
       const winner = exit.won ? pick : pick === 'YES' ? 'NO' : 'YES';
-      outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${cents(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;
+      outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${tradeMoney(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${tradeMoney(Math.abs(exit.pnl))} after fees.`;
     } else {
-      outcomeStory = `${stopped ? 'Stop loss closed this bet' : 'We closed this bet'} before settlement at ${time(exit.ts)}. Received ${cents(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.${stopped ? ` ${exit.reason}` : ''}`;
+      outcomeStory = `${stopped ? 'Stop loss closed this bet' : 'We closed this bet'} before settlement at ${time(exit.ts)}. Received ${tradeMoney(returnValue)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${tradeMoney(Math.abs(exit.pnl))} after fees.${stopped ? ` ${exit.reason}` : ''}`;
       outcomeStory += sale?.verdict === 'good'
-        ? ` Good sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have lost. Selling recovered ${cents(sale.sale_return)} instead of $0.`
+        ? ` Good sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have lost. Selling recovered ${tradeMoney(sale.sale_return)} instead of $0.`
         : sale?.verdict === 'bad'
-          ? ` Bad sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have won. Holding would have returned ${cents(sale.hold_return)}, ${cents(-sale.advantage)} more than selling.`
+          ? ` Bad sell: Kalshi settled ${sale.result.toUpperCase()}. Our pick would have won. Holding would have returned ${tradeMoney(sale.hold_return)}, ${tradeMoney(-sale.advantage)} more than selling.`
           : ' Waiting for the official result to see whether selling helped.';
     }
     const detailHtml = `<div class="trade-detail-body trade-story">
@@ -287,7 +287,7 @@ function renderTrades(rows, positions = []) {
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
       <td class="num" data-label="Paid">${esc(paid)}</td>
       <td class="trade-result" data-label="Status" aria-label="${esc(statusMeaning)}" title="${esc(statusMeaning)}">${esc(outcomeLabel)}</td>
-      <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${cents(Math.abs(profit))}`) : "—"}${!exit ? '<sup class="expected-mark" aria-label="expected if won">*</sup>' : ''}</td>
+      <td data-label="Profit" class="num ${exit && profit < 0 ? "bad" : exit && profit > 0 ? "good" : ""}" title="${exit ? 'Realized profit after fees' : 'Profit after fees if the bet wins; not probability-weighted'}">${Number.isFinite(profit) ? esc(`${profit > 0 ? "+" : profit < 0 ? "−" : ""}${tradeMoney(Math.abs(profit))}`) : "—"}${!exit ? '<sup class="expected-mark" aria-label="expected if won">*</sup>' : ''}</td>
       <td class="num" data-label="Opened" title="${esc(entry ? new Date(entry.ts).toLocaleString() : "")}">${entry ? esc(time(entry.ts)) : "—"}</td>
       <td class="num" data-label="${closeLabel}" title="${esc(closeAt ? `${closeLabel}: ${new Date(closeAt).toLocaleString()}${exit ? '' : '; official settlement may follow later'}` : '')}">${closeAt ? esc(time(closeAt)) : "—"}${!exit && closeAt ? '<sup class="expected-mark" aria-label="expected close">*</sup>' : ''}</td>
     </tr><tr class="trade-expansion"><td colspan="8"><div id="${esc(detailId)}" class="trade-reveal ${expanded ? 'is-open' : ''}" ${expanded ? '' : 'inert'}><div class="trade-reveal-clip">${detailHtml}</div></div></td></tr>`;
