@@ -67,6 +67,10 @@ def quote_in_band(quote: Quote, params: StrategyParams) -> bool:
         return False
     if quote.spread - 1e-9 > params.max_spread:
         return False
+    if params.pick_underdog and params.entry_window_minutes > 0:
+        # The opposite side's executable bid is 1 - this side's ask.
+        # Require that favorite to clear the threshold, then buy this side.
+        return 1 - quote.ask + 1e-12 >= params.min_probability
     return quote.bid + 1e-12 >= params.min_probability and quote.ask + 1e-12 >= params.min_probability
 
 
@@ -174,8 +178,8 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
         _ok, _fee, _profit, detail = _fee_ok(quote, params)
         return Proposal(
             quote=quote, shares=shares_for_budget(quote, params), edge=0.0,
-            signal="paper_favorite", detail=detail,
-            confirm="Quoted favorite; historical evidence is not required",
+            signal="paper_underdog" if params.pick_underdog else "paper_favorite", detail=detail,
+            confirm="Opposite of the quoted favorite" if params.pick_underdog else "Quoted favorite; historical evidence is not required",
         )
     wins, n = book.calibration.get(price_bucket(quote.ask), (0, 0))
     if n < params.min_sample:
@@ -204,7 +208,7 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
     now = now or datetime.now(timezone.utc)
     if not quote_in_band(quote, params):
         return (f"Final check: bid {quote.bid:.1%}, ask {quote.ask:.1%}, spread {quote.spread:.1%}; "
-                f"both prices must meet {params.min_probability:.1%} and spread must not exceed {params.max_spread:.1%}.")
+                f"the {'opposite favorite' if params.pick_underdog and params.entry_window_minutes > 0 else 'selected side'} must meet {params.min_probability:.1%} and spread must not exceed {params.max_spread:.1%}.")
     structural = _structural(quote, params, now)
     if structural is not None:
         return f"Final check: {structural[1]}"

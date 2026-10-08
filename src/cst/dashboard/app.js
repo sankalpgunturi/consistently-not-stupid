@@ -152,7 +152,7 @@ function renderKnobs(rows) {
     const adjustable = row.adjustable !== false && Number.isFinite(row.step);
     const changed = value !== row.value;
     return `<div class="knob">
-      <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.key === 'min_probability' ? 'Entry probability' : row.label)}</label>
+      <div class="knob-setting"><label for="knob-${esc(row.key)}">${esc(row.label)}</label>
       <output aria-live="polite" id="value-${esc(row.key)}">${esc(formatKnob({...row, value}))}</output>
       ${adjustable ? `<input type="range" id="knob-${esc(row.key)}" data-knob="${esc(row.key)}" min="0" max="${Math.round((row.max-row.min)/row.step)}" step="1" value="${Math.round((value-row.min)/row.step)}" aria-valuetext="${esc(formatKnob({...row,value}))}" title="Choose a value, then apply" ${knobBusy || pendingCommand ? 'disabled' : ''}>
       <div class="slider-bounds" aria-hidden="true"><span>${esc(formatKnob({...row,value:row.min}))}</span><span>${esc(formatKnob({...row,value:row.max}))}</span></div>` : ''}</div>
@@ -175,6 +175,7 @@ $("knobs").addEventListener("input", event => {
 
 function formatKnob(row) {
   const value = Number(row.value);
+  if (row.key === "pick_underdog") return value ? "Underdog" : "Favorite";
   const cents = new Set(["min_edge", "min_win_profit", "max_spread", "stop_gap"]);
   const percent = new Set([
     "min_probability", "max_position_fraction", "max_deployed_fraction",
@@ -257,7 +258,7 @@ function renderTrades(rows, positions = []) {
       ? `Bought at ${time(entry.ts)} when our pick was priced at ${probability}. Paid ${paid} including fees.`
       : 'The original purchase details are unavailable.';
     const why = Number.isFinite(winProfit) && winProfit > 0
-      ? `We entered for the high quoted probability and ${cents(winProfit)} profit if our pick won.` : '';
+      ? `We entered ${entry?.signal === "paper_underdog" ? "against the favorite" : "for the high quoted probability"}, with ${cents(winProfit)} profit if our pick won.` : '';
     let outcomeStory;
     if (!exit) {
       outcomeStory = `Waiting for the official result.${closeAt ? ` Market closes at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${cents(profitIfWin || 0)}. Lose: −${cents(paidValue || 0)}.`;

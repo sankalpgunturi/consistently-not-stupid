@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     kalshi_page_size: int = 200
 
     entry_window_minutes: float = 5
+    pick_underdog: int = 0
     min_probability: float = 0.80
     amount_per_bet: float = 1.0
     stop_loss_minutes: int = 0
@@ -54,6 +55,7 @@ class Settings(BaseSettings):
         return StrategyParams(
             entry_window_minutes=self.entry_window_minutes,
             min_probability=self.min_probability,
+            pick_underdog=self.pick_underdog,
             amount_per_bet=self.amount_per_bet,
             stop_loss_minutes=self.stop_loss_minutes,
             exit_probability=self.exit_probability,

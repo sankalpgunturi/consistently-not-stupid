@@ -17,7 +17,7 @@ def test_visible_settings_are_editable_both_directions_and_persist(tmp_path):
     with TestClient(create_app(engine, start_loop=False), base_url='http://127.0.0.1') as client:
         state = client.get('/api/state').json()
         headers = {'X-CSRF-Token': state['csrf']}
-        assert [r['key'] for r in state['params']] == ['entry_window_minutes', 'min_probability', 'scan_interval_seconds', 'amount_per_bet', 'stop_loss_minutes', 'exit_probability']
+        assert [r['key'] for r in state['params']] == ['pick_underdog', 'entry_window_minutes', 'min_probability', 'scan_interval_seconds', 'amount_per_bet', 'stop_loss_minutes', 'exit_probability']
         for row in state['params']:
             key = row['key']
             for value in (row['max'], row['min']):

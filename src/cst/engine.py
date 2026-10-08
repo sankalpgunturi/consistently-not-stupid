@@ -289,7 +289,7 @@ class Engine:
                 "positions": [item.to_json() for item in book.positions],
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
-                "strategy_thesis": f"{params.min_probability:.0%}+ favorites, event cutoff within {params.entry_window_minutes:g} minutes for fixed-interval price contracts (estimated outcome for other markets), small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
+                "strategy_thesis": f"Buy {'the underdog opposite' if params.pick_underdog else 'the side of'} a {params.min_probability:.0%}+ favorite, event cutoff within {params.entry_window_minutes:g} minutes for fixed-interval price contracts (estimated outcome for other markets), small unrelated bets; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
@@ -503,7 +503,7 @@ class Engine:
                             "throttles": BUDGET.throttles, "quotes": len(quotes)}
         observations = []
         for quote in quotes:
-            if max(quote.bid, quote.ask) < params.min_probability:
+            if (1 - quote.bid if params.pick_underdog else max(quote.bid, quote.ask)) < params.min_probability:
                 continue
             row = asdict(quote)
             row["key"] = quote.key
@@ -822,7 +822,7 @@ class Engine:
         resolved = len(settlements)
         hits = sum(1 for row in settlements if row.won)
         unrealized = sum(item.mark_value - item.cost_basis for item in positions)
-        param_rows = [{"key": key, "label": label, "value": getattr(params, key),
+        param_rows = [{"key": key, "label": "Favorite probability" if key == "min_probability" and params.pick_underdog else label, "value": getattr(params, key),
                        "min": lo, "max": hi, "step": step, "adjustable": True}
                       for key, (label, lo, hi, step) in OPERATOR_CONTROLS.items()]
         retros = [] if compact else self.store.retros(6)
