@@ -235,7 +235,8 @@ function renderTrades(rows, positions = []) {
     const sold = exit?.action === "sell";
     const outcomeClass = sold ? (sale?.verdict === "good" ? "trade-win" : sale?.verdict === "bad" ? "trade-loss" : "")
       : !exit ? "" : exit.pnl > 0 ? "trade-win" : exit.pnl < 0 ? "trade-loss" : "";
-    const outcomeLabel = !exit ? "Open" : sold
+    const awaitingResult = !exit && position?.end_time && new Date(position.end_time).getTime() <= Date.now();
+    const outcomeLabel = !exit ? (awaitingResult ? "Awaiting result" : "Open") : sold
       ? (sale?.verdict === "good" ? "Sold ✓" : sale?.verdict === "bad" ? "Sold ✕" : "Sold …")
       : exit.won ? "Won" : "Lost";
     const statusMeaning = sold ? (sale?.verdict === "good" ? "Good sell: our pick ultimately lost"
@@ -262,7 +263,7 @@ function renderTrades(rows, positions = []) {
       ? `We entered ${entry?.signal === "paper_underdog" ? "against the favorite" : "for the high quoted probability"}, with ${cents(winProfit)} profit if our pick won.` : '';
     let outcomeStory;
     if (!exit) {
-      outcomeStory = `Waiting for the official result.${closeAt ? ` Market closes at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${cents(profitIfWin || 0)}. Lose: −${cents(paidValue || 0)}.`;
+      outcomeStory = `Waiting for the official result.${closeAt ? ` Market ${awaitingResult ? "closed" : "closes"} at ${time(closeAt)}; settlement may follow later.` : ''} Win: +${cents(profitIfWin || 0)}. Lose: −${cents(paidValue || 0)}.`;
     } else if (exit.action === 'settle') {
       const winner = exit.won ? pick : pick === 'YES' ? 'NO' : 'YES';
       outcomeStory = `Kalshi settled ${winner}. Our pick ${exit.won ? 'won' : 'lost'}. Received ${cents(returnValue)} at ${time(exit.ts)}. ${exit.pnl >= 0 ? 'Profit' : 'Loss'}: ${cents(Math.abs(exit.pnl))} after fees.`;

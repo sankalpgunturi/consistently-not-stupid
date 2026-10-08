@@ -210,6 +210,19 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     )
 
 
+def _has_trading_position(book: BookView, now: datetime) -> bool:
+    """Closed markets await official settlement without tying up free cash."""
+    for position in book.positions:
+        close = position.end_time
+        try:
+            close = datetime.fromisoformat(close) if isinstance(close, str) else close
+            if close is None or close > now:
+                return True
+        except (TypeError, ValueError):
+            return True
+    return False
+
+
 def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: datetime | None = None, already_bought: int = 0, shares: float | None = None) -> str | None:
     """Explain a failed admission recheck using current quotes, rules and book."""
     now = now or datetime.now(timezone.utc)
@@ -233,7 +246,7 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
     if params.all_in and params.entry_window_minutes > 0:
         if book.trading_mode != "paper":
             return "All-in sizing is only available in paper mode."
-        if book.positions or already_bought:
+        if _has_trading_position(book, now) or already_bought:
             return "All-in mode waits until the previous bet closes."
         if shares is not None and shares != shares_for_budget(quote, params, book.cash):
             return "All-in cash changed after sizing; wait for a fresh proposal."
@@ -369,7 +382,7 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         if twin:
             rows.append(_Row(quote, "correlation", twin, edge=proposal.edge))
             continue
-        if params.all_in and params.entry_window_minutes > 0 and (book.trading_mode != "paper" or book.positions or proposals):
+        if params.all_in and params.entry_window_minutes > 0 and (book.trading_mode != "paper" or _has_trading_position(book, now) or proposals):
             rows.append(_Row(quote, "budget", "All-in paper mode takes one bet at a time."))
             continue
         fits, cost, why = _clip_fits(quote, params, book.equity, cash=book.cash)

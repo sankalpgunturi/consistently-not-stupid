@@ -83,3 +83,19 @@ def test_engine_resizes_all_in_at_refreshed_price(tmp_path):
     assert state['positions'][0]['shares']==expected
     assert checked[0]==expected
     assert engine.store.cash()<fresh.ask+float(fee_for('kalshi',1,fresh.ask))
+
+
+def test_all_in_uses_only_free_cash_while_closed_market_awaits_result():
+    q,p,b=setup(894.90)
+    old=make_quote(market_id='old',event_id='old',title='Oil settlement',category='Other',end_time=NOW-timedelta(hours=4))
+    b.positions=[SimpleNamespace(**{**asdict(old), 'end_time': old.end_time.isoformat()}, cost_basis=.97)]
+    result=evaluate([q],p,b,now=NOW)
+    assert len(result.proposals)==1
+    n=result.proposals[0].shares
+    assert n==shares_for_budget(q,p,894.90)
+    assert tightened_out(q,p,b,now=NOW,shares=n) is None
+    assert tightened_out(q,p,b,now=NOW,shares=n,already_bought=1) is not None
+    # Missing close timestamps must not silently allow overlapping active bets.
+    b.positions[0].end_time=None
+    assert not evaluate([q],p,b,now=NOW).proposals
+    assert tightened_out(q,p,b,now=NOW,shares=n) is not None
