@@ -673,22 +673,22 @@ class Engine:
             bool(paused),
             "New buys paused by the operator." if paused else "The operator resumed new buys.",
         )
-        return self.snapshot()
+        return self.snapshot(compact=True)
 
     def block_market(self, key: str) -> dict:
         self.store.block(key, "The operator blocked this contract.")
-        return self.snapshot()
+        return self.snapshot(compact=True)
 
     def set_control(self, key: str, value: float) -> tuple[dict, str | None]:
         import math
         if key == "all_in" and value and self.store.trading_mode() != "paper":
-            return self.snapshot(), "All-in sizing is only available in paper mode."
+            return self.snapshot(compact=True), "All-in sizing is only available in paper mode."
         spec = OPERATOR_CONTROLS.get(key)
         if spec is None:
-            return self.snapshot(), "Unknown setting."
+            return self.snapshot(compact=True), "Unknown setting."
         _label, lo, hi, step = spec
         if not math.isfinite(value) or not lo <= value <= hi or abs((value-lo)/step - round((value-lo)/step)) > 1e-7:
-            return self.snapshot(), "Value is outside the allowed range or step."
+            return self.snapshot(compact=True), "Value is outside the allowed range or step."
         value = round(value, 8)
         before = {}
         def revise(current):
@@ -699,7 +699,7 @@ class Engine:
         self.store.revise_params(revise)
         self.store.append_audit("operator", "setting", before, {key: value}, "Operator selected a strategy setting.")
         self._wake.set()
-        return self.snapshot(), None
+        return self.snapshot(compact=True), None
 
     def tighten(self, key: str) -> tuple[dict, str | None]:
         change: dict[str, float] = {}
