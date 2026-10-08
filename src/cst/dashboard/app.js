@@ -298,7 +298,7 @@ function drawProfit(points) {
   const chart = $("equity");
   const series = [0, ...points.map(p => p.cumulative_pnl)];
   const total = series[series.length - 1];
-  $("profit-total").textContent = money(total, 3);
+  $("profit-total").textContent = money(total);
   $("profit-total").className = `num ${total < 0 ? "bad" : total > 0 ? "good" : ""}`;
   $("profit-empty").classList.toggle("hidden", points.length > 0);
   chart.classList.toggle("hidden", points.length === 0);
@@ -311,12 +311,12 @@ function drawProfit(points) {
   let path = `M ${x(0)} ${y(0)}`;
   series.slice(1).forEach((value, i) => { path += ` H ${x(i + 1)} V ${y(value)}`; });
   chart.innerHTML = `<title>Cumulative net profit from ${points.length} completed trades</title>
-    ${ticks.map(value => `<line x1="95" x2="1065" y1="${y(value)}" y2="${y(value)}" stroke="${value === 0 ? '#948773' : '#38332b'}" stroke-dasharray="4 5"/><text x="82" y="${y(value) + 4}" text-anchor="end" fill="#afa595" font-size="13">${esc(money(value, 3))}</text>`).join("")}
-    <path d="${path}" fill="none" stroke="#e0b56a" stroke-width="2.5"/>
+    ${ticks.map(value => `<line x1="95" x2="1065" y1="${y(value)}" y2="${y(value)}" stroke="${value === 0 ? '#948773' : '#38332b'}" stroke-dasharray="4 5"/><text x="82" y="${y(value) + 4}" text-anchor="end" fill="#afa595" font-size="13">${esc(money(value))}</text>`).join("")}
+    <path d="${path}" fill="none" stroke="#e0b56a" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
     <text x="1065" y="225" text-anchor="end" fill="#afa595" font-size="13">${points.length} completed trade${points.length === 1 ? '' : 's'}</text>
     ${points.map((point, i) => {
       const label = `${point.title} · ${point.side ? point.side.toUpperCase() : 'Pick unavailable'} · ${new Date(point.ts).toLocaleString()} · Trade ${money(point.pnl, 3)} · Total ${money(point.cumulative_pnl, 3)}`;
-      return `<circle cx="${x(i + 1)}" cy="${y(point.cumulative_pnl)}" r="6" fill="${point.pnl < 0 ? '#df967e' : '#a9ce8b'}" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title></circle>`;
+      return `<circle class="profit-point" cx="${x(i + 1)}" cy="${y(point.cumulative_pnl)}" r="6" fill="${point.pnl < 0 ? '#df967e' : '#a9ce8b'}" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title></circle>`;
     }).join("")}`;
 }
 

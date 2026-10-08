@@ -348,7 +348,8 @@ summary:focus-visible, button:focus-visible { outline: 2px solid var(--brass); o
 
 #equity { display: block; width: 100%; height: auto; }
 #equity.hidden { display: none; }
-#equity circle:hover, #equity circle:focus { stroke: var(--cream); stroke-width: 3px; outline: none; }
+#equity .profit-point { opacity: 0; pointer-events: all; }
+#equity .profit-point:hover, #equity .profit-point:focus { opacity: 1; stroke: var(--cream); stroke-width: 1.5px; outline: none; }
 
 .trade-history tr.trade-win { background: rgba(157, 204, 134, 0.09); }
 .trade-history tr.trade-loss { background: rgba(229, 137, 114, 0.08); }
