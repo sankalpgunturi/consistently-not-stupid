@@ -337,6 +337,7 @@ class BookView:
     settlements: list[Settlement] = field(default_factory=list)
     blocked: set[str] = field(default_factory=set)
     operator_pause: bool = False
+    trading_mode: str = "paper"
 
 
 # Explicit operator controls; automatic reviews retain their tightening rails.

@@ -1133,6 +1133,7 @@ class Store:
             settlements=self.settlements(),
             blocked=self.blocked(),
             operator_pause=self.operator_pause(),
+            trading_mode=self.trading_mode(),
         )
 
     def mark_equity(self, positions: list[Position] | None = None) -> float:

@@ -60,6 +60,12 @@ def price_bucket(price: float) -> str:
     return "0.96–0.99"
 
 
+def drawdown_limit_applies(params: StrategyParams, trading_mode: str) -> bool:
+    # The operator explicitly disabled the account-loss pause for the ongoing
+    # short-window paper experiment. Preserve live and legacy replay behavior.
+    return trading_mode != "paper" or params.entry_window_minutes == 0
+
+
 def quote_in_band(quote: Quote, params: StrategyParams) -> bool:
     if not quote.tradable or quote.settled or quote.bid <= 0 or quote.ask <= 0:
         return False
@@ -216,7 +222,7 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
         return "Final check: the quote has not met the required number of stable observations."
     if _learned_signal(quote, params, book) is None:
         return "Final check: the legacy settled record does not clear the all-in cost."
-    drawdown_hit = book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
+    drawdown_hit = drawdown_limit_applies(params, book.trading_mode) and book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
     if quote.key in book.blocked:
         return "Final check: this contract is blocked."
     if book.operator_pause:
@@ -307,7 +313,7 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
     counts["confirmed"] = len(signals)
     ordered = sorted(signals.values(), key=lambda item: (-item.edge, item.quote.end_time or datetime.max.replace(tzinfo=timezone.utc)))
 
-    drawdown_hit = book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
+    drawdown_hit = drawdown_limit_applies(params, book.trading_mode) and book.peak > 0 and (book.peak - book.equity) / book.peak >= params.max_drawdown - 1e-12
     paused = book.operator_pause or drawdown_hit
     pause_detail = (
         "New buys are paused by the operator. Exits still run."

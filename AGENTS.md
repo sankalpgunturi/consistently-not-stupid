@@ -31,3 +31,5 @@ Production paper engine: `chitti-rc-personal`, `/opt/cst`, systemd units `cst-pa
 - The short-window strategy holds to the official outcome when stop loss is Off (the default). If the operator enables it, our side’s bid below the selected absolute probability triggers a depth-checked exit during the selected final minutes before trading close (or expected outcome if earlier). Manual close remains available; legacy replay retains its stop rule.
 
 - User-approved timing: supported fixed-interval price contracts enter relative to the event cutoff at trading close, not the later settlement estimate. Other markets retain estimated-outcome timing; do not assume every close is an event cutoff.
+
+- The operator disabled the account-wide drawdown pause for short-window paper trading. Keep manual pause and normal entry/execution checks; preserve drawdown protection for live mode and legacy replay. Do not reset equity or history to resume trading.

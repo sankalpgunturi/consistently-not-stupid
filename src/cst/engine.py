@@ -23,7 +23,7 @@ from cst.models import OPERATOR_CONTROLS, Decision, Quote, StrategyParams
 from cst.review import Reviewer, govern, heuristic_summary, heuristic_updates, merge_suggestions, tighten_value
 from cst.simulate import run_report
 from cst.store import Store
-from cst.strategy import probability_stop_reason, shares_for_budget, _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
+from cst.strategy import drawdown_limit_applies, probability_stop_reason, shares_for_budget, _fee_ok, drop_proposals, evaluate, price_bucket, quote_in_band, tightened_out, wilson_lower
 from cst.fees import fee_for
 from cst.live import KalshiTrader, LiveTradingError, parse_live_amount
 from cst.venues.kalshi import fetch_kalshi, fetch_kalshi_ticker, fetch_settled_record
@@ -795,6 +795,8 @@ class Engine:
     def _paused(self, params: StrategyParams) -> bool:
         if self.store.operator_pause():
             return True
+        if not drawdown_limit_applies(params, self.store.trading_mode()):
+            return False
         book = self.store.book()
         if book.peak <= 0:
             return False
@@ -808,7 +810,7 @@ class Engine:
         drawdown = (peak - equity) / peak if peak else 0
         info = self.store.cycle_info()
         counts = info.get("counts") or {}
-        drawdown_pause = peak > 0 and drawdown >= params.max_drawdown - 1e-12
+        drawdown_pause = drawdown_limit_applies(params, self.store.trading_mode()) and peak > 0 and drawdown >= params.max_drawdown - 1e-12
         operator_pause = self.store.operator_pause()
         paused = drawdown_pause or operator_pause
         started = self.store.paper_started_at()

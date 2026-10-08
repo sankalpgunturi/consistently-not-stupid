@@ -6,7 +6,8 @@ from cst.config import Settings
 
 from cst.models import BookView, Quote, StrategyParams
 
-NOW = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
+# Keep synthetic engine quotes in the future as the calendar advances.
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 @pytest.fixture(autouse=True)
