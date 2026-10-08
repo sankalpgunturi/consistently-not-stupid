@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     entry_window_minutes: float = 5
     pick_underdog: int = 0
     min_probability: float = 0.80
+    all_in: int = 0
     amount_per_bet: float = 1.0
     stop_loss_minutes: int = 0
     exit_probability: float = 0.60
@@ -56,6 +57,7 @@ class Settings(BaseSettings):
             entry_window_minutes=self.entry_window_minutes,
             min_probability=self.min_probability,
             pick_underdog=self.pick_underdog,
+            all_in=self.all_in,
             amount_per_bet=self.amount_per_bet,
             stop_loss_minutes=self.stop_loss_minutes,
             exit_probability=self.exit_probability,

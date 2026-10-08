@@ -145,7 +145,7 @@ function renderKnobs(rows) {
   const stamp = JSON.stringify({rows, disabled: knobBusy || Boolean(pendingCommand)});
   if (stamp === knobRenderStamp) return;
   knobRenderStamp = stamp;
-  $("knobs").innerHTML = rows.map(row => {
+  $("knobs").innerHTML = rows.filter(row => row.key !== "amount_per_bet" || !rows.some(r => r.key === "all_in" && r.value)).map(row => {
     let draft = knobDrafts.get(row.key);
     if (draft && draft.current !== row.value) { knobDrafts.delete(row.key); draft = null; }
     const value = draft?.value ?? row.value;
@@ -175,6 +175,7 @@ $("knobs").addEventListener("input", event => {
 
 function formatKnob(row) {
   const value = Number(row.value);
+  if (row.key === "all_in") return value ? "All in" : "Fixed amount";
   if (row.key === "pick_underdog") return value ? "Underdog" : "Favorite";
   const cents = new Set(["min_edge", "min_win_profit", "max_spread", "stop_gap"]);
   const percent = new Set([

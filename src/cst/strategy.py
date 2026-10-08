@@ -111,17 +111,18 @@ def probability_stop_reason(quote: Quote, params: StrategyParams, now: datetime 
             f"before the exit deadline {deadline.isoformat()}.")
 
 
-def shares_for_budget(quote: Quote, params: StrategyParams) -> float:
+def shares_for_budget(quote: Quote, params: StrategyParams, cash: float | None = None) -> float:
     if params.entry_window_minutes == 0:
         return quote.min_shares
     # Whole contracts, including the venue's rounded fee, never exceed budget.
     if quote.ask <= 0 or not math.isfinite(quote.ask):
         return 0
-    lo, hi = 0, int(params.amount_per_bet / quote.ask)
+    budget = max(0, cash or 0) if params.all_in else params.amount_per_bet
+    lo, hi = 0, int(budget / quote.ask)
     while lo < hi:
         middle = (lo + hi + 1) // 2
         cost = middle * quote.ask + float(fee_for(quote.fee_model, middle, quote.ask, quote.fee_rate, quote.fee_exponent))
-        if cost <= params.amount_per_bet + 1e-9:
+        if cost <= budget + 1e-9:
             lo = middle
         else:
             hi = middle - 1
@@ -183,7 +184,7 @@ def _learned_signal(quote: Quote, params: StrategyParams, book: BookView) -> Pro
     if params.entry_window_minutes > 0:
         _ok, _fee, _profit, detail = _fee_ok(quote, params)
         return Proposal(
-            quote=quote, shares=shares_for_budget(quote, params), edge=0.0,
+            quote=quote, shares=shares_for_budget(quote, params, book.cash), edge=0.0,
             signal="paper_underdog" if params.pick_underdog else "paper_favorite", detail=detail,
             confirm="Opposite of the quoted favorite" if params.pick_underdog else "Quoted favorite; historical evidence is not required",
         )
@@ -229,34 +230,41 @@ def tightened_out(quote: Quote, params: StrategyParams, book: BookView, now: dat
         return "Final check: new buys are paused by the operator."
     if drawdown_hit:
         return "Final check: the account has reached its drawdown limit."
+    if params.all_in and params.entry_window_minutes > 0:
+        if book.trading_mode != "paper":
+            return "All-in sizing is only available in paper mode."
+        if book.positions or already_bought:
+            return "All-in mode waits until the previous bet closes."
+        if shares is not None and shares != shares_for_budget(quote, params, book.cash):
+            return "All-in cash changed after sizing; wait for a fresh proposal."
     held = {f"{item.venue}:{item.market_id}:{item.side}" for item in book.positions}
     if quote.key in held or _twin_of(quote, [], book, params):
         return "Final check: the book already holds this risk."
-    fits, cost, why = _clip_fits(quote, params, book.equity, shares)
+    fits, cost, why = _clip_fits(quote, params, book.equity, shares, book.cash)
     if not fits:
         return f"Final check: {why}"
     if cost > book.cash + 1e-9:
         return "Final check: insufficient cash for the all-in cost."
     deployed = sum(item.cost_basis for item in book.positions)
-    if deployed + cost > book.equity * params.max_deployed_fraction + 1e-9:
+    if not (params.all_in and params.entry_window_minutes > 0) and deployed + cost > book.equity * params.max_deployed_fraction + 1e-9:
         return "Final check: the clip exceeds the total exposure limit."
     category = sum(item.cost_basis for item in book.positions if item.category == quote.category)
-    if category + cost > book.equity * params.max_category_fraction + 1e-9:
+    if not (params.all_in and params.entry_window_minutes > 0) and category + cost > book.equity * params.max_category_fraction + 1e-9:
         return "Final check: the clip exceeds the category exposure limit."
     if already_bought >= params.max_new_per_cycle:
         return "Final check: this scan has reached its limit on new buys."
     return None
 
 
-def _clip_fits(quote: Quote, params: StrategyParams, equity: float, shares: float | None = None) -> tuple[bool, float, str]:
-    shares = shares_for_budget(quote, params) if shares is None else shares
+def _clip_fits(quote: Quote, params: StrategyParams, equity: float, shares: float | None = None, cash: float | None = None) -> tuple[bool, float, str]:
+    shares = shares_for_budget(quote, params, cash) if shares is None else shares
     if shares < quote.min_shares:
         return False, 0, "The amount per bet cannot cover one contract including fees."
     if quote.ask_size >= 0 and shares > quote.ask_size:
         return False, 0, "The order book cannot cover the selected amount."
     fee = float(fee_for(quote.fee_model, shares, quote.ask, quote.fee_rate, quote.fee_exponent))
     cost = shares * quote.ask + fee
-    cap = params.amount_per_bet if params.entry_window_minutes > 0 else equity * params.max_position_fraction
+    cap = (max(0, cash or 0) if params.all_in else params.amount_per_bet) if params.entry_window_minutes > 0 else equity * params.max_position_fraction
     if cost > cap + 1e-9:
         return False, cost, (
             f"The selected contracts cost ${cost:.2f}, and the per-trade cap is ${cap:.2f}."
@@ -361,18 +369,21 @@ def evaluate(quotes: list[Quote], params: StrategyParams, book: BookView, now: d
         if twin:
             rows.append(_Row(quote, "correlation", twin, edge=proposal.edge))
             continue
-        fits, cost, why = _clip_fits(quote, params, book.equity)
+        if params.all_in and params.entry_window_minutes > 0 and (book.trading_mode != "paper" or book.positions or proposals):
+            rows.append(_Row(quote, "budget", "All-in paper mode takes one bet at a time."))
+            continue
+        fits, cost, why = _clip_fits(quote, params, book.equity, cash=book.cash)
         if not fits:
             rows.append(_Row(quote, "size", why, edge=proposal.edge))
             continue
-        if deployed + cost > deploy_cap + 1e-9:
+        if not (params.all_in and params.entry_window_minutes > 0) and deployed + cost > deploy_cap + 1e-9:
             rows.append(_Row(
                 quote, "budget",
                 f"Buying this would put ${deployed + cost:.2f} to work. The deployed cap is ${deploy_cap:.2f}.",
                 edge=proposal.edge,
             ))
             continue
-        if cat_deployed[quote.category] + cost > book.equity * params.max_category_fraction + 1e-9:
+        if not (params.all_in and params.entry_window_minutes > 0) and cat_deployed[quote.category] + cost > book.equity * params.max_category_fraction + 1e-9:
             rows.append(_Row(
                 quote, "budget",
                 f"{quote.category} would go past the category cap.",

@@ -33,3 +33,5 @@ Production paper engine: `chitti-rc-personal`, `/opt/cst`, systemd units `cst-pa
 - User-approved timing: supported fixed-interval price contracts enter relative to the event cutoff at trading close, not the later settlement estimate. Other markets retain estimated-outcome timing; do not assume every close is an event cutoff.
 
 - The operator disabled the account-wide drawdown pause for short-window paper trading. Keep manual pause and normal entry/execution checks; preserve drawdown protection for live mode and legacy replay. Do not reset equity or history to resume trading.
+
+- All-in sizing is an explicit paper-only option. It spends available cash after fees on one whole-contract position at a time, replacing percentage exposure caps while retaining probability, timing, manual pause, liquidity/depth and cash checks. Existing positions must close before the next all-in entry. Fixed sizing remains available.
