@@ -488,3 +488,5 @@ dialog h2 { margin-bottom: 12px; }
   .trade-history .strategy-heading td { display: block; }
   .trade-history .strategy-heading td::before { display: none; }
 }
+
+#strategy-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11px; margin-top: 8px; }

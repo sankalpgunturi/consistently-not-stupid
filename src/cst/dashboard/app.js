@@ -320,6 +320,14 @@ function renderTrades(rows, positions = []) {
 
 function drawProfit(points) {
   const chart = $("equity");
+  let legend = $("strategy-legend");
+  if (!legend) {
+    legend = document.createElement('div');
+    legend.id = 'strategy-legend';
+    chart.after(legend);
+  }
+  const usedPeriods = new Map(points.map(point => { const p = tradeStrategy(point.id); return [p?.id || 'unknown', p]; }));
+  legend.innerHTML = [...usedPeriods.values()].map(p => `<span style="color:${strategyColor(p)}" title="${esc(strategyLabel(p))}">${p ? `S${p.number}` : '?'} ${p?.settings ? (p.settings.pick_underdog ? 'Underdog' : 'Favorite') + (p.settings.all_in ? ' / All in' : '') : 'Unknown'}</span>`).join('');
   const series = [0, ...points.map(p => p.cumulative_pnl)];
   const total = series[series.length - 1];
   $("profit-total").textContent = money(total);
