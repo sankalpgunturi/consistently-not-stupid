@@ -890,6 +890,7 @@ class Engine:
             "market_links": self.store.market_links(),
             "equity_curve": [] if compact else self.store.equity_curve(),
             "realized_curve": self.store.realized_curve(),
+            "strategy_periods": self.store.strategy_periods(),
             "params": param_rows,
             "retrospective": retros[0] if retros else None,
             "retrospective_history": retros,

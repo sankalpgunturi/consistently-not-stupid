@@ -566,6 +566,20 @@ class Store:
             ).fetchall()
         return [_trade(row) for row in rows]
 
+    def strategy_periods(self) -> dict:
+        from cst.strategy_periods import build_periods
+        with self.lock:
+            trades = self.conn.execute(
+                "SELECT id, ts, venue, market_id, side, action FROM trades WHERE ledger = ? ORDER BY ts, rowid",
+                (self._ledger(),),
+            ).fetchall()
+            scans = self.conn.execute("""
+                SELECT json_extract(d.payload, '$.key') AS key, s.ts, s.payload
+                FROM decisions d JOIN scans s ON s.cycle = d.cycle
+                WHERE json_extract(d.payload, '$.action') = 'bought'
+            """).fetchall()
+        return build_periods(trades, scans)
+
     def realized_curve(self) -> list[dict]:
         """Completed trades only; pnl already includes entry and exit fees."""
         with self.lock:

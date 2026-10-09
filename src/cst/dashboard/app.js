@@ -88,6 +88,7 @@ function render(next) {
     sale_reviews: next.sale_reviews,
     market_links: next.market_links,
     realized_curve: next.realized_curve,
+    strategy_periods: next.strategy_periods,
     focus: next.focus,
     retro: next.latest_model_review,
     cycle: next.cycle,
@@ -194,6 +195,23 @@ function formatKnob(row) {
   return String(row.value);
 }
 
+const strategyColors = ['#e0b56a', '#80b8cf', '#c3a0cf', '#a9ce8b'];
+function tradeStrategy(id) {
+  const history = state?.strategy_periods;
+  return history?.periods?.find(p => p.id === history.trades?.[id]);
+}
+function strategyLabel(period) {
+  const p = period?.settings;
+  if (!p) return 'Unknown settings';
+  const pick = p.pick_underdog ? 'Underdog' : 'Favorite';
+  const sizing = p.all_in ? 'All in' : p.amount_per_bet != null ? money(p.amount_per_bet) + '/bet' : 'Size unknown';
+  const stop = p.stop_loss_minutes == null ? 'Stop unknown' : p.stop_loss_minutes ? `Stop <${Math.round(p.exit_probability * 100)}% / last ${p.stop_loss_minutes}m` : 'Stop off';
+  return `${pick} · ${Math.round(p.min_probability * 100)}% · ${p.entry_window_minutes}m · ${sizing} · ${stop} · Scan ${p.scan_interval_seconds}s`;
+}
+function strategyColor(period) {
+  return period ? strategyColors[(period.number - 1) % strategyColors.length] : '#948773';
+}
+
 function renderTrades(rows, positions = []) {
   const stories = [];
   const pending = new Map();
@@ -218,7 +236,9 @@ function renderTrades(rows, positions = []) {
     ts: position.opened_at, reason: position.reason,
   }, exit: null, position}));
   const all = [...openStories, ...stories.filter(story => story.exit).reverse()];
+  all.sort((a, b) => (tradeStrategy(b.entry?.id || b.exit?.id)?.number || 0) - (tradeStrategy(a.entry?.id || a.exit?.id)?.number || 0));
   const visible = all.slice(0, tradeLimit);
+  let previousStrategy;
   const more = $("more-trades");
   const remaining = Math.min(5, all.length - visible.length);
   more.classList.toggle("hidden", remaining === 0);
@@ -281,7 +301,11 @@ function renderTrades(rows, positions = []) {
       ${why ? `<p>${esc(why)}</p>` : ''}
       <p class="${exit ? exit.pnl < 0 ? 'bad' : 'good' : ''}">${esc(outcomeStory)}</p>
     </div>`;
-    return `<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}" tabindex="0" aria-expanded="${expanded}" aria-controls="${esc(detailId)}" aria-label="${esc(row.title)}: trade details">
+    const period = tradeStrategy(entry?.id || exit?.id);
+    const periodKey = period?.id || 'unknown';
+    const heading = previousStrategy === periodKey ? '' : `<tr class="strategy-heading"><td colspan="8"><strong style="color:${strategyColor(period)}">${period ? `S${period.number}` : 'Unknown'}</strong> ${esc(strategyLabel(period))}</td></tr>`;
+    previousStrategy = periodKey;
+    return `${heading}<tr class="trade-row ${outcomeClass}" data-trade="${esc(tradeId)}" tabindex="0" aria-expanded="${expanded}" aria-controls="${esc(detailId)}" aria-label="${esc(row.title)}: trade details">
       <td class="title" data-label="Trade">${marketUrl ? `<a class="trade-link" href="${esc(marketUrl)}" target="_blank" rel="noopener noreferrer">${esc(row.title)}</a>` : esc(row.title)}</td>
       <td data-label="Pick">${esc((row.side || exit?.side || "—").toUpperCase())}</td>
       <td class="num" data-label="Entry probability" title="Market-implied probability from our entry price, before fees">${esc(probability)}</td>
@@ -308,14 +332,24 @@ function drawProfit(points) {
   const x = i => 95 + i * 970 / Math.max(1, points.length);
   const y = value => 20 + (max - value) / (max - min) * 175;
   const ticks = [...new Set([lo, 0, hi])];
-  let path = `M ${x(0)} ${y(0)}`;
-  series.slice(1).forEach((value, i) => { path += ` H ${x(i + 1)} V ${y(value)}`; });
+  const segments = [];
+  points.forEach((point, i) => {
+    const period = tradeStrategy(point.id);
+    const key = period?.id || 'unknown';
+    let segment = segments[segments.length - 1];
+    if (!segment || segment.key !== key) {
+      segment = {key, period, start: i, end: i + 1, path: `M ${x(i)} ${y(series[i])}`};
+      segments.push(segment);
+    }
+    segment.end = i + 1;
+    segment.path += ` H ${x(i + 1)} V ${y(point.cumulative_pnl)}`;
+  });
   chart.innerHTML = `<title>Cumulative net profit from ${points.length} completed trades</title>
     ${ticks.map(value => `<line x1="95" x2="1065" y1="${y(value)}" y2="${y(value)}" stroke="${value === 0 ? '#948773' : '#38332b'}" stroke-dasharray="4 5"/><text x="82" y="${y(value) + 4}" text-anchor="end" fill="#afa595" font-size="13">${esc(money(value))}</text>`).join("")}
-    <path d="${path}" fill="none" stroke="#e0b56a" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    ${segments.map(segment => `<g><title>${esc(strategyLabel(segment.period))}</title><path d="${segment.path}" fill="none" stroke="${strategyColor(segment.period)}" stroke-width="1.5" vector-effect="non-scaling-stroke"/><line x1="${x(segment.start)}" x2="${x(segment.start)}" y1="20" y2="195" stroke="${strategyColor(segment.period)}" stroke-opacity=".3" stroke-dasharray="3 5"/>${x(segment.end)-x(segment.start)>28 ? `<text x="${x(segment.start)+4}" y="15" fill="${strategyColor(segment.period)}" font-size="12">${segment.period ? `S${segment.period.number}` : '?'}</text>` : ''}</g>`).join('')}
     <text x="1065" y="225" text-anchor="end" fill="#afa595" font-size="13">${points.length} completed trade${points.length === 1 ? '' : 's'}</text>
     ${points.map((point, i) => {
-      const label = `${point.title} · ${point.side ? point.side.toUpperCase() : 'Pick unavailable'} · ${new Date(point.ts).toLocaleString()} · Trade ${money(point.pnl, 3)} · Total ${money(point.cumulative_pnl, 3)}`;
+      const label = `${tradeStrategy(point.id) ? `S${tradeStrategy(point.id).number}` : "Unknown strategy"} · ${point.title} · ${point.side ? point.side.toUpperCase() : 'Pick unavailable'} · ${new Date(point.ts).toLocaleString()} · Trade ${money(point.pnl, 3)} · Total ${money(point.cumulative_pnl, 3)}`;
       return `<circle class="profit-point" cx="${x(i + 1)}" cy="${y(point.cumulative_pnl)}" r="6" fill="${point.pnl < 0 ? '#df967e' : '#a9ce8b'}" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title></circle>`;
     }).join("")}`;
 }
