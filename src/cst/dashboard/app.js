@@ -176,7 +176,7 @@ $("knobs").addEventListener("input", event => {
 
 function formatKnob(row) {
   const value = Number(row.value);
-  if (row.key === "all_in") return value ? "All in" : "Fixed amount";
+  if (row.key === "all_in") return value === 2 ? "⅓ of balance" : value ? "All in" : "Fixed amount";
   if (row.key === "pick_underdog") return value ? "Underdog" : "Favorite";
   const cents = new Set(["min_edge", "min_win_profit", "max_spread", "stop_gap"]);
   const percent = new Set([
@@ -204,7 +204,7 @@ function strategyLabel(period) {
   const p = period?.settings;
   if (!p) return 'Unknown settings';
   const pick = p.pick_underdog ? 'Underdog' : 'Favorite';
-  const sizing = p.all_in ? 'All in' : p.amount_per_bet != null ? money(p.amount_per_bet) + '/bet' : 'Size unknown';
+  const sizing = p.all_in === 2 ? '⅓ of balance' : p.all_in ? 'All in' : p.amount_per_bet != null ? money(p.amount_per_bet) + '/bet' : 'Size unknown';
   const stop = p.stop_loss_minutes == null ? 'Stop unknown' : p.stop_loss_minutes ? `Stop <${Math.round(p.exit_probability * 100)}% / last ${p.stop_loss_minutes}m` : 'Stop off';
   return `${pick} · ${Math.round(p.min_probability * 100)}% · ${p.entry_window_minutes}m · ${sizing} · ${stop} · Scan ${p.scan_interval_seconds}s`;
 }
@@ -327,7 +327,7 @@ function drawProfit(points) {
     chart.after(legend);
   }
   const usedPeriods = new Map(points.map(point => { const p = tradeStrategy(point.id); return [p?.id || 'unknown', p]; }));
-  legend.innerHTML = [...usedPeriods.values()].map(p => `<span style="color:${strategyColor(p)}" title="${esc(strategyLabel(p))}">${p ? `S${p.number}` : '?'} ${p?.settings ? (p.settings.pick_underdog ? 'Underdog' : 'Favorite') + (p.settings.all_in ? ' / All in' : '') : 'Unknown'}</span>`).join('');
+  legend.innerHTML = [...usedPeriods.values()].map(p => `<span style="color:${strategyColor(p)}" title="${esc(strategyLabel(p))}">${p ? `S${p.number}` : '?'} ${p?.settings ? (p.settings.pick_underdog ? 'Underdog' : 'Favorite') + (p.settings.all_in === 2 ? ' / ⅓ balance' : p.settings.all_in ? ' / All in' : '') : 'Unknown'}</span>`).join('');
   const series = [0, ...points.map(p => p.cumulative_pnl)];
   const total = series[series.length - 1];
   $("profit-total").textContent = money(total);

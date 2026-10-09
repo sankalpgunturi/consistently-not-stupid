@@ -289,7 +289,7 @@ class Engine:
                 "positions": [item.to_json() for item in book.positions],
                 "recent_trades": [item.to_json() for item in self.store.trades(20)],
                 "calibration": book.calibration,
-                "strategy_thesis": f"Buy {'the underdog opposite' if params.pick_underdog else 'the side of'} a {params.min_probability:.0%}+ favorite, event cutoff within {params.entry_window_minutes:g} minutes for fixed-interval price contracts (estimated outcome for other markets), {'one all-in paper bet at a time' if params.all_in else 'small unrelated bets'}; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
+                "strategy_thesis": f"Buy {'the underdog opposite' if params.pick_underdog else 'the side of'} a {params.min_probability:.0%}+ favorite, event cutoff within {params.entry_window_minutes:g} minutes for fixed-interval price contracts (estimated outcome for other markets), {'one one-third-balance paper bet at a time' if params.all_in == 2 else 'one all-in paper bet at a time' if params.all_in else 'small unrelated bets'}; net portfolio performance after fees should be nonnegative over each 24-hour period, with a fixed $1,000 contribution and proceeds available for reinvestment. Individual losses are allowed; long-term capital preservation is a target, not a guarantee.",
                 "daily_evaluations": days,
                 "daily_review_instruction": "Review each pending 24-hour evaluation, especially negative days. Distinguish execution bugs, fees, correlated exposure, miscalibration and ordinary variance. Examine archived day evidence before suggesting changes; no automatic loosening or capital top-ups. A flat day without trades does not validate the strategy.",
                 "near_resolution_evidence": self.store.research_summary()["near_resolution"],
@@ -350,7 +350,8 @@ class Engine:
                 refreshed.event_title = proposal.quote.event_title
                 proposal.quote = refreshed
             sizing = self.store.params()
-            available_size = shares_for_budget(proposal.quote, sizing, self.store.cash())
+            sizing_book = self.store.book()
+            available_size = shares_for_budget(proposal.quote, sizing, sizing_book.cash, sizing_book.equity)
             proposal.shares = available_size if sizing.all_in else min(proposal.shares, available_size)
             if proposal.shares < proposal.quote.min_shares:
                 continue

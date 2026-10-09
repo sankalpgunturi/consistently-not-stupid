@@ -69,10 +69,11 @@ def test_all_in_blocks_live_switch_and_operator_can_restore_fixed_size(tmp_path)
     assert engine.store.params().all_in==0
 
 
-def test_engine_resizes_all_in_at_refreshed_price(tmp_path):
+@pytest.mark.parametrize("sizing_mode", [1, 2])
+def test_engine_resizes_all_in_at_refreshed_price(tmp_path, sizing_mode):
     from cst.depth import DepthResult
     q,p,b=setup(1000)
-    engine=Engine(Settings(data_dir=str(tmp_path),openai_api_key='',all_in=1,min_stable_scans=1),fetcher=lambda _: ([q],[]))
+    engine=Engine(Settings(data_dir=str(tmp_path),openai_api_key='',all_in=sizing_mode,min_stable_scans=1),fetcher=lambda _: ([q],[]))
     fresh=replace(q,ask=.81)
     engine.refresher=lambda *_: fresh
     checked=[]
@@ -82,7 +83,8 @@ def test_engine_resizes_all_in_at_refreshed_price(tmp_path):
     assert state['counts']['bought']==1
     assert state['positions'][0]['shares']==expected
     assert checked[0]==expected
-    assert engine.store.cash()<fresh.ask+float(fee_for('kalshi',1,fresh.ask))
+    budget=1000 if sizing_mode==1 else 1000/3
+    assert 0 <= budget-(1000-engine.store.cash()) < fresh.ask+float(fee_for('kalshi',1,fresh.ask))
 
 
 def test_all_in_uses_only_free_cash_while_closed_market_awaits_result():
@@ -99,3 +101,20 @@ def test_all_in_uses_only_free_cash_while_closed_market_awaits_result():
     b.positions[0].end_time=None
     assert not evaluate([q],p,b,now=NOW).proposals
     assert tightened_out(q,p,b,now=NOW,shares=n) is not None
+
+
+@pytest.mark.parametrize('cash,equity', [(900,900),(900,990),(100,900),(0,900)])
+def test_one_third_balance_includes_fees_and_cannot_spend_unsettled_value(cash,equity):
+    q,p,b=setup(cash)
+    p.all_in=2
+    b.equity=equity
+    budget=min(cash,equity/3)
+    n=shares_for_budget(q,p,cash,equity)
+    cost=lambda count: count*q.ask+float(fee_for(q.fee_model,count,q.ask,q.fee_rate,q.fee_exponent))
+    assert cost(n)<=budget+1e-9<cost(n+1)
+    result=evaluate([q],p,b,now=NOW)
+    if n:
+        assert result.proposals[0].shares==n
+        assert tightened_out(q,p,b,now=NOW,shares=n) is None
+    else:
+        assert not result.proposals

@@ -347,7 +347,7 @@ OPERATOR_CONTROLS = {
     "entry_window_minutes": ("Outcome within", 1, 60, 1),
     "min_probability": ("Entry probability", 0.80, 0.99, 0.01),
     "scan_interval_seconds": ("Scan every", 1, 60, 1),
-    "all_in": ("Bet size", 0, 1, 1),
+    "all_in": ("Bet size", 0, 2, 1),
     "amount_per_bet": ("Amount per bet", 1, 100, 1),
     "stop_loss_minutes": ("Stop loss: final minutes", 0, 60, 1),
     "exit_probability": ("Exit below", 0.01, 0.99, 0.01),

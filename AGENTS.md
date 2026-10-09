@@ -35,3 +35,5 @@ Production paper engine: `chitti-rc-personal`, `/opt/cst`, systemd units `cst-pa
 - The operator disabled the account-wide drawdown pause for short-window paper trading. Keep manual pause and normal entry/execution checks; preserve drawdown protection for live mode and legacy replay. Do not reset equity or history to resume trading.
 
 - All-in sizing is an explicit paper-only option. It spends available cash after fees on one whole-contract position at a time, replacing percentage exposure caps while retaining probability, timing, manual pause, liquidity/depth and cash checks. Positions still trading block the next all-in entry; positions past trading close may await official settlement while available cash funds a new bet. Unsettled payouts are never spendable cash. Fixed sizing remains available.
+
+- Balance-based paper sizing also supports one-third of current account equity, capped by available cash and inclusive of fees. The `all_in` sizing enum is 0=fixed, 1=all available cash, 2=one-third balance. Preserve one active trading position at a time and retain the historical mode in strategy periods.
